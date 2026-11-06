@@ -1,0 +1,6 @@
+{
+  "name": "Sistema de Almacén y Distribución de Formatos de Salud - DIRESA LCC",
+  "description": "Sistema web para la gestión de almacén, lotes, programación, recepción, inventario y distribución de formatos de salud (FUA, historias clínicas, HIS, recetarios, hojas de referencia) para la Sub Región de Salud Luciano Castillo Colonna.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
