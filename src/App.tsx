@@ -4149,89 +4149,165 @@ export default function App() {
         </div>
       )}
 
-      {/* QR Code Label Reader Modal */}
+      {/* QR Code & OCR Label Reader & Programmed FUA Verification Modal */}
       {showQrModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-xl w-full p-6 space-y-4 max-h-[92vh] overflow-y-auto">
             <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-              <div>
-                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                  <QrCode className="w-5 h-5 text-purple-600" /> Lector / Verificador de Etiqueta QR de Proveedor
-                </h3>
-                <p className="text-xs text-slate-500">Escanee o ingrese el texto codificado en el paquete del proveedor para autocompletar la recepción.</p>
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-purple-100 text-purple-700 rounded-xl">
+                  <QrCode className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Verificación de FUAs e Ingresos (OCR / QR)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Valide si la cantidad ingresada corresponde a un <b>Ingreso Total</b> o <b>Ingreso Parcial</b> del establecimiento.
+                  </p>
+                </div>
               </div>
               <button
+                type="button"
                 onClick={() => setShowQrModal(false)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
+            {/* Selector de Método: OCR vs QR */}
+            <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1.5 rounded-2xl">
+              <button
+                type="button"
+                onClick={() => openCameraScanner('ocr')}
+                className="py-2.5 px-3 bg-purple-700 hover:bg-purple-800 text-white font-bold rounded-xl text-xs shadow flex items-center justify-center gap-2 transition-all"
+              >
+                <Camera className="w-4 h-4" />
+                Escaneo por Foto (OCR)
+              </button>
+              <button
+                type="button"
+                onClick={() => openCameraScanner('qr')}
+                className="py-2.5 px-3 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs shadow flex items-center justify-center gap-2 transition-all"
+              >
+                <QrCode className="w-4 h-4 text-purple-400" />
+                Escaneo con Cámara QR
+              </button>
+            </div>
+
             {/* Quick Demo Labels */}
-            <div className="bg-purple-50 p-3 rounded-xl border border-purple-200 space-y-2">
-              <p className="text-[11px] font-bold text-purple-900">Etiquetas QR de Ejemplo de Proveedores (Probar lectura):</p>
+            <div className="bg-purple-50/80 p-3 rounded-2xl border border-purple-200 space-y-2">
+              <div className="flex justify-between items-center">
+                <span className="text-[11px] font-bold text-purple-950 flex items-center gap-1">
+                  <Layers className="w-3.5 h-3.5 text-purple-600" /> Probar con Programación Registrada:
+                </span>
+                <span className="text-[10px] text-purple-700 font-medium">Haga clic para simular lectura</span>
+              </div>
               <div className="flex flex-wrap gap-1.5">
-                {programming.slice(0, 2).map((p: any) => (
+                {programming.slice(0, 3).map((p: any) => (
                   <button
                     key={p.id}
                     type="button"
                     onClick={() => {
-                      const demoQR = `FUA|RENAES:${p.renaes}|LOTE:${p.batch_codigo}|CANT:${p.cantidad - p.cantidad_recibida || 1000}|DOC:GUIA-PROV-2026-0${p.id}`;
+                      const demoQR = `FUA|RENAES:${p.renaes}|LOTE:${p.batch_codigo}|CANT:${Math.round(p.cantidad * 0.4)}|DOC:GUIA-PROV-2026-0${p.id}`;
                       setQrInput(demoQR);
                     }}
-                    className="px-2.5 py-1 bg-white hover:bg-purple-600 hover:text-white border border-purple-300 text-purple-800 text-[10px] font-bold rounded-lg transition-colors shadow-sm"
+                    className="px-2.5 py-1 bg-white hover:bg-purple-600 hover:text-white border border-purple-300 text-purple-900 text-[10px] font-bold rounded-lg transition-colors shadow-xs"
                   >
-                    🏷️ FUA Prog #{p.id} ({p.renaes})
-                  </button>
-                ))}
-                {products.filter(p => p.tipo === 'otro').slice(0, 2).map((p: any) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    onClick={() => {
-                      const demoQR = `HIS|CODIGO:${p.codigo}|CANT:100|DOC:GUIA-HIS-2026-88`;
-                      setQrInput(demoQR);
-                    }}
-                    className="px-2.5 py-1 bg-white hover:bg-purple-600 hover:text-white border border-purple-300 text-purple-800 text-[10px] font-bold rounded-lg transition-colors shadow-sm"
-                  >
-                    🏷️ {p.codigo} (100 u.)
+                    🏷️ RENAES {p.renaes} ({p.establishment_nombre})
                   </button>
                 ))}
               </div>
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
-                Código QR / Código de Barras de la Etiqueta
+                Código QR o Texto Extraído por OCR
               </label>
               <textarea
-                rows={3}
-                placeholder="Escanee con lector de barras/QR o pegue el contenido de la etiqueta..."
+                rows={2}
+                placeholder="Escanee QR o ingrese: FUA|RENAES:00001986|LOTE:27|CANT:3000..."
                 value={qrInput}
                 onChange={e => setQrInput(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-300 rounded-xl p-3 text-xs font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-600"
               />
             </div>
 
+            {/* Resultado de Verificación de Ingreso Total vs Parcial */}
             {qrVerificationResult && (
-              <div className={`p-3.5 rounded-xl border text-xs ${
-                qrVerificationResult.success ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-red-50 border-red-300 text-red-950'
+              <div className={`p-4 rounded-2xl border ${
+                qrVerificationResult.success
+                  ? qrVerificationResult.isTotal
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-950 shadow-sm'
+                    : 'bg-amber-50 border-amber-300 text-amber-950 shadow-sm'
+                  : 'bg-rose-50 border-rose-300 text-rose-950'
               }`}>
                 {qrVerificationResult.success ? (
-                  <div className="flex items-start gap-2">
-                    <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="font-bold text-emerald-900">{qrVerificationResult.title}</p>
-                      <p className="text-[11px] text-emerald-800 font-mono mt-0.5">{qrVerificationResult.details}</p>
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        {qrVerificationResult.isTotal ? (
+                          <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+                        ) : (
+                          <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
+                        )}
+                        <div>
+                          <p className="font-bold text-sm">{qrVerificationResult.title}</p>
+                          <p className="text-[11px] opacity-80">{qrVerificationResult.details}</p>
+                        </div>
+                      </div>
+                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide ${
+                        qrVerificationResult.isTotal
+                          ? 'bg-emerald-600 text-white shadow-xs'
+                          : 'bg-amber-500 text-white shadow-xs'
+                      }`}>
+                        {qrVerificationResult.isTotal ? '✅ INGRESO TOTAL (100%)' : '⚠️ INGRESO PARCIAL'}
+                      </span>
                     </div>
+
+                    {/* Progress Bar for Programmed Goal */}
+                    {qrVerificationResult.cantProgramada > 0 && (
+                      <div className="bg-white/80 p-3 rounded-xl border border-slate-200/60 space-y-2">
+                        <div className="flex justify-between items-center text-xs font-bold">
+                          <span>Avance de Ingreso del Establecimiento:</span>
+                          <span>{qrVerificationResult.pct}% ({qrVerificationResult.nuevoTotal.toLocaleString()} de {qrVerificationResult.cantProgramada.toLocaleString()} u.)</span>
+                        </div>
+                        <div className="w-full bg-slate-200 rounded-full h-3 overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-500 rounded-full ${
+                              qrVerificationResult.isTotal ? 'bg-emerald-500' : 'bg-amber-500'
+                            }`}
+                            style={{ width: `${Math.min(100, qrVerificationResult.pct)}%` }}
+                          ></div>
+                        </div>
+                        <div className="grid grid-cols-4 gap-1 text-[10px] text-center pt-1 font-mono">
+                          <div className="bg-slate-100 p-1.5 rounded-lg">
+                            <span className="block text-slate-500 text-[9px] uppercase font-sans">Programado</span>
+                            <span className="font-bold text-slate-800">{qrVerificationResult.cantProgramada.toLocaleString()}</span>
+                          </div>
+                          <div className="bg-slate-100 p-1.5 rounded-lg">
+                            <span className="block text-slate-500 text-[9px] uppercase font-sans">Anterior</span>
+                            <span className="font-bold text-slate-800">{qrVerificationResult.cantPrevio.toLocaleString()}</span>
+                          </div>
+                          <div className="bg-purple-100 p-1.5 rounded-lg border border-purple-200">
+                            <span className="block text-purple-700 text-[9px] uppercase font-sans font-bold">+Ingresando</span>
+                            <span className="font-bold text-purple-900">+{qrVerificationResult.cantIngresando.toLocaleString()}</span>
+                          </div>
+                          <div className={`p-1.5 rounded-lg ${qrVerificationResult.saldoPendiente > 0 ? 'bg-amber-100 text-amber-900 font-bold' : 'bg-emerald-100 text-emerald-900 font-bold'}`}>
+                            <span className="block text-[9px] uppercase font-sans">Pendiente</span>
+                            <span>{qrVerificationResult.saldoPendiente > 0 ? `${qrVerificationResult.saldoPendiente.toLocaleString()} u.` : '0 u.'}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="flex items-start gap-2">
-                    <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                    <AlertCircle className="w-5 h-5 text-rose-600 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-bold text-red-950">Error de Verificación</p>
-                      <p className="text-[11px] text-red-800 mt-0.5">{qrVerificationResult.error}</p>
+                      <p className="font-bold text-rose-950">No se encontró coincidencia</p>
+                      <p className="text-[11px] text-rose-800 mt-0.5">{qrVerificationResult.error}</p>
                     </div>
                   </div>
                 )}
@@ -4288,12 +4364,18 @@ export default function App() {
                     if (matchedProg) {
                       const progRecs = receptions.filter((r: any) => String(r.programming_id) === String(matchedProg.id));
                       let maxEnd = 0;
+                      let cantPrevio = matchedProg.cantidad_recibida || 0;
                       for (const pr of progRecs) {
                         if (pr.range_end && pr.range_end > maxEnd) maxEnd = pr.range_end;
                       }
                       const calculatedStart = maxEnd > 0 ? maxEnd + 1 : matchedProg.range_start;
-                      const qty = parseInt(parsed.cant || parsed.cantidad) || Math.max(1, matchedProg.cantidad - (matchedProg.cantidad_recibida || 0));
-                      const calculatedEnd = calculatedStart + qty - 1;
+                      const cantProgramada = matchedProg.cantidad || 0;
+                      const cantIngresando = parseInt(parsed.cant || parsed.cantidad) || Math.max(1, cantProgramada - cantPrevio);
+                      const calculatedEnd = calculatedStart + cantIngresando - 1;
+                      const nuevoTotal = cantPrevio + cantIngresando;
+                      const saldoPendiente = Math.max(0, cantProgramada - nuevoTotal);
+                      const isTotal = nuevoTotal >= cantProgramada;
+                      const pct = cantProgramada > 0 ? Math.min(100, Math.round((nuevoTotal / cantProgramada) * 100)) : 100;
 
                       setRecType('fua');
                       setRecForm({
@@ -4303,7 +4385,7 @@ export default function App() {
                         batch_id: String(matchedProg.batch_id),
                         supplier_id: String(matchedProg.supplier_id || ''),
                         documento: parsed.doc || parsed.guia || parsed.factura || 'GR-PROV-2026-QR',
-                        cantidad_recibida: qty,
+                        cantidad_recibida: cantIngresando,
                         range_start: calculatedStart,
                         range_end: calculatedEnd,
                         product_id: ''
@@ -4312,11 +4394,23 @@ export default function App() {
                       setQrVerificationResult({
                         success: true,
                         type: 'FUA',
-                        title: `FUA Prog #${matchedProg.id} - ${matchedProg.establishment_nombre}`,
-                        details: `Lote ${matchedProg.batch_codigo} | RENAES ${matchedProg.renaes} | Cantidad: ${qty.toLocaleString()} u. | Guía: ${parsed.doc || parsed.guia || 'GR-PROV-2026-QR'}`
+                        title: `IPRESS: ${matchedProg.establishment_nombre} (RENAES: ${matchedProg.renaes})`,
+                        details: `Lote ${matchedProg.batch_codigo} | Guía: ${parsed.doc || parsed.guia || 'GR-PROV-2026'}`,
+                        cantProgramada,
+                        cantPrevio,
+                        cantIngresando,
+                        nuevoTotal,
+                        saldoPendiente,
+                        isTotal,
+                        pct
                       });
-                      showToast(`✅ QR verificado: FUA ${matchedProg.establishment_nombre} autocompletado`);
-                      setTimeout(() => setShowQrModal(false), 1200);
+
+                      showToast(
+                        isTotal
+                          ? `✅ ¡Ingreso TOTAL Completo! 100% de la programación de ${matchedProg.establishment_nombre} alcanzado.`
+                          : `⚠️ Ingreso PARCIAL: ${cantIngresando.toLocaleString()} u. ingresadas (${pct}% del total programado).`,
+                        'success'
+                      );
                     } else if (matchedProd) {
                       const qty = parseInt(parsed.cant || parsed.cantidad) || 50;
                       setRecType('demanda');
@@ -4333,23 +4427,29 @@ export default function App() {
                         success: true,
                         type: 'DEMANDA',
                         title: `${matchedProd.nombre} (${matchedProd.codigo})`,
-                        details: `Almacén Central | Cantidad: ${qty} ${matchedProd.unidad_control} | Guía: ${parsed.doc || parsed.guia || 'GR-PROV-2026-QR'}`
+                        details: `Ingreso a Demanda | Cantidad: ${qty} ${matchedProd.unidad_control}`,
+                        cantProgramada: qty,
+                        cantPrevio: 0,
+                        cantIngresando: qty,
+                        nuevoTotal: qty,
+                        saldoPendiente: 0,
+                        isTotal: true,
+                        pct: 100
                       });
                       showToast(`✅ QR verificado: ${matchedProd.nombre} autocompletado`);
-                      setTimeout(() => setShowQrModal(false), 1200);
                     } else {
                       setQrVerificationResult({
                         success: false,
-                        error: `No se encontró programación ni producto para el código: "${rawText}"`
+                        error: `No se encontró ningún establecimiento ni programación activa para el código: "${rawText}"`
                       });
                     }
                   } catch (err: any) {
-                    showToast('Error al procesar el código QR', 'error');
+                    showToast('Error al procesar la lectura o código de verificación', 'error');
                   }
                 }}
                 className="flex items-center gap-1.5 px-4 py-2 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-semibold rounded-xl text-xs shadow"
               >
-                <Check className="w-4 h-4" /> Verificar y Autocompletar
+                <Check className="w-4 h-4" /> Verificar Ingreso Total / Parcial
               </button>
             </div>
           </div>
