@@ -9,6 +9,40 @@ import {
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
+import QRCode from 'qrcode';
+
+function RealQRCode({ value, size = 120 }: { value: string; size?: number }) {
+  const [dataUrl, setDataUrl] = useState<string>('');
+
+  useEffect(() => {
+    if (!value) return;
+    QRCode.toDataURL(value, {
+      margin: 1,
+      width: size * 2,
+      errorCorrectionLevel: 'M'
+    })
+      .then(url => setDataUrl(url))
+      .catch(err => console.error('Error generando QR code:', err));
+  }, [value, size]);
+
+  if (!dataUrl) {
+    return (
+      <div style={{ width: size, height: size }} className="flex items-center justify-center bg-slate-50 animate-pulse rounded">
+        <QrCode className="w-8 h-8 text-slate-400" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={dataUrl}
+      alt={`Código QR ${value}`}
+      style={{ width: size, height: size }}
+      className="rounded object-contain"
+    />
+  );
+}
+
 function SearchableEstablishmentSelect({
   establishments,
   value,
@@ -611,7 +645,7 @@ export default function App() {
     }
   };
 
-  const printPackageLabel = (pkg: any) => {
+  const printPackageLabel = async (pkg: any) => {
     try {
       const doc = new jsPDF({
         orientation: 'landscape',
@@ -641,19 +675,29 @@ export default function App() {
       }
       doc.text(`UBICACIÓN: ${pkg.ubicacion_almacen || 'Almacén Central'}`, 6, 48);
 
-      // Marco del código QR
-      doc.rect(72, 16, 23, 23);
-      doc.setFontSize(6);
-      doc.text('CÓDIGO QR', 83.5, 27, { align: 'center' });
-      doc.text(pkg.codigo_paquete, 83.5, 31, { align: 'center' });
+      // Generación del código QR 2D real y escaneable
+      const codeToEncode = pkg.codigo_paquete || 'PKG-2026-00001';
+      const qrDataUrl = await QRCode.toDataURL(codeToEncode, {
+        margin: 1,
+        width: 320,
+        errorCorrectionLevel: 'M'
+      });
 
+      // Insertar imagen del código QR real en la etiqueta
+      doc.addImage(qrDataUrl, 'PNG', 69, 15, 26, 26);
+      doc.setFontSize(6.5);
+      doc.setFont('helvetica', 'bold');
+      doc.text(codeToEncode, 82, 44, { align: 'center' });
+
+      doc.setFont('helvetica', 'normal');
       doc.setFontSize(7);
       doc.text('Conserve esta etiqueta para el control de entrega y trazabilidad.', 50, 56, { align: 'center' });
 
       doc.save(`Etiqueta_${pkg.codigo_paquete}.pdf`);
-      showToast(`✅ Etiqueta de la caja ${pkg.codigo_paquete} generada en PDF para impresión`);
+      showToast(`✅ Etiqueta con QR real de la caja ${pkg.codigo_paquete} generada en PDF para impresión`);
     } catch (err) {
-      showToast('Error al generar etiqueta PDF', 'error');
+      console.error('Error generando etiqueta PDF con QR:', err);
+      showToast('Error al generar etiqueta PDF con código QR', 'error');
     }
   };
 
@@ -3519,6 +3563,14 @@ export default function App() {
                             </button>
                             <button
                               type="button"
+                              onClick={() => printPackageLabel(pkg)}
+                              className="px-2.5 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-semibold rounded-lg text-xs transition-colors flex items-center gap-1 shadow-xs"
+                              title="Imprimir o reimprimir etiqueta con código QR"
+                            >
+                              <Printer className="w-3.5 h-3.5" /> Imprimir
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => {
                                 setPackageForm({
                                   id: pkg.id,
@@ -5496,7 +5548,7 @@ export default function App() {
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col sm:flex-row items-center gap-4">
                   <div className="bg-white p-3 rounded-xl border border-slate-300 shadow-sm flex flex-col items-center">
                     <div className="w-32 h-32 bg-white flex items-center justify-center border-2 border-slate-900 rounded-lg p-1">
-                      <QrCode className="w-24 h-24 text-slate-900" />
+                      <RealQRCode value={selectedPackage.codigo_paquete} size={116} />
                     </div>
                     <span className="text-[10px] font-mono font-bold text-purple-700 mt-2">
                       {selectedPackage.codigo_paquete}
