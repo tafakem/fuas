@@ -771,7 +771,7 @@ export default function App() {
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(10);
-      doc.text('DIRESA PIURA - SUB REGION LUCIANO CASTILLO', 50, 7, { align: 'center' });
+      doc.text('DIRECCION SUB REGIONAL DE SALUD LUCIANO CASTILLO COLONNA', 50, 7, { align: 'center' });
       doc.setFontSize(8);
       doc.setFont('helvetica', 'normal');
       doc.text('ETIQUETA DE CAJA / PAQUETE DE FORMATOS', 50, 11, { align: 'center' });
@@ -1187,7 +1187,7 @@ export default function App() {
     doc.setFont('helvetica', 'bold');
     doc.text('Origen / Sub Región:', 18, 76);
     doc.setFont('helvetica', 'normal');
-    doc.text('Almacén Central DIRESA LCC - Sullana', 55, 76);
+    doc.text('Almacén Central DSLLCC - Sullana', 55, 76);
 
     doc.setFont('helvetica', 'bold');
     doc.text('Estado Comprobante:', 110, 76);
@@ -1312,13 +1312,13 @@ export default function App() {
     doc.setFontSize(8);
     doc.setTextColor(51, 65, 85);
     doc.text(`Usuario Emisor: ${delivery.username || 'Almacén Central'}`, leftMarginSig2 + lineWidth / 2, currentY + 8.5, { align: 'center' });
-    doc.text('DIRESA Luciano Castillo Colonna', leftMarginSig2 + lineWidth / 2, currentY + 12.5, { align: 'center' });
+    doc.text('DIRECCION SUB REGIONAL DE SALUD LUCIANO CASTILLO COLONNA', leftMarginSig2 + lineWidth / 2, currentY + 12.5, { align: 'center' });
     doc.text('Sullana - Piura', leftMarginSig2 + lineWidth / 2, currentY + 16.5, { align: 'center' });
 
     // Pie de página oficial
     doc.setFontSize(7);
     doc.setTextColor(148, 163, 184);
-    doc.text(`Sistema de Control de Formatos — DIRESA LCC Sullana | Generado el ${new Date().toLocaleString()}`, pageWidth / 2, 287, { align: 'center' });
+    doc.text(`Sistema de Control de Formatos — DSLLCC Sullana | Generado el ${new Date().toLocaleString()}`, pageWidth / 2, 287, { align: 'center' });
 
     // Guardar archivo PDF
     doc.save(`Acta_Entrega_${delivery.numero_comprobante || 'Formatos'}.pdf`);
@@ -1346,7 +1346,7 @@ export default function App() {
     doc.setFontSize(13);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(15, 23, 42);
-    doc.text('DIRESA PIURA - SUB REGIÓN DE SALUD LUCIANO CASTILLO COLONNA', pageWidth / 2, 14, { align: 'center' });
+    doc.text('DIRECCION SUB REGIONAL DE SALUD LUCIANO CASTILLO COLONNA', pageWidth / 2, 14, { align: 'center' });
 
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
@@ -1428,7 +1428,7 @@ export default function App() {
     doc.setFontSize(13);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(15, 23, 42);
-    doc.text('DIRESA PIURA - SUB REGIÓN DE SALUD LUCIANO CASTILLO COLONNA', pageWidth / 2, 14, { align: 'center' });
+    doc.text('DIRECCION SUB REGIONAL DE SALUD LUCIANO CASTILLO COLONNA', pageWidth / 2, 14, { align: 'center' });
 
     doc.setFontSize(10);
     doc.setFont('helvetica', 'normal');
@@ -1508,7 +1508,7 @@ export default function App() {
             <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-600 text-white rounded-2xl shadow-lg mb-4">
               <Building2 className="w-8 h-8" />
             </div>
-            <h1 className="text-2xl font-bold text-slate-900">DIRESA LCC</h1>
+            <h1 className="text-2xl font-bold text-slate-900">DSLLCC</h1>
             <p className="text-sm text-slate-600 mt-1">Dirección de Aseguramiento en Salud</p>
             <p className="text-xs text-blue-600 font-medium mt-2">Sistema de Almacén y Distribución de Formatos</p>
           </div>
@@ -1586,7 +1586,7 @@ export default function App() {
               DI
             </div>
             <div>
-              <h1 className="font-bold text-sm tracking-wide">DIRESA LUCIANO CASTILLO COLONNA</h1>
+              <h1 className="font-bold text-sm tracking-wide">DIRECCION SUB REGIONAL DE SALUD LUCIANO CASTILLO COLONNA</h1>
               <p className="text-xs text-blue-400">Dirección de Aseguramiento en Salud • 206+ Establecimientos</p>
             </div>
           </div>
@@ -2196,7 +2196,7 @@ export default function App() {
             const doc = new jsPDF();
             doc.setFontSize(14);
             doc.setTextColor(30, 41, 59);
-            doc.text('DIRESA PIURA - SUB REGIÓN DE SALUD LUCIANO CASTILLO COLONNA', 14, 15);
+            doc.text('DIRECCION SUB REGIONAL DE SALUD LUCIANO CASTILLO COLONNA', 14, 15);
             doc.setFontSize(11);
             doc.text('REPORTE GENERAL DE PROGRAMACIÓN DE FORMATOS FUA Y CORRELATIVOS', 14, 22);
             doc.setFontSize(9);
@@ -3544,7 +3544,7 @@ export default function App() {
             const doc = new jsPDF();
             doc.setFontSize(14);
             doc.setTextColor(30, 41, 59);
-            doc.text('DIRESA PIURA - SUB REGIÓN DE SALUD LUCIANO CASTILLO COLONNA', 14, 15);
+            doc.text('DIRECCION SUB REGIONAL DE SALUD LUCIANO CASTILLO COLONNA', 14, 15);
             doc.setFontSize(11);
             doc.text('REPORTE HISTÓRICO DE ENTREGAS Y COMPROBANTES', 14, 22);
             doc.setFontSize(9);
@@ -4197,7 +4197,7 @@ export default function App() {
                       Módulo de Usuarios, Seguridad y Auditoría
                     </h2>
                     <p className="text-xs text-slate-500 mt-1">
-                      DIRESA Piura — Sub Región de Salud Luciano Castillo Colonna | Control de accesos, roles, trazabilidad e integraciones.
+                      DIRECCION SUB REGIONAL DE SALUD LUCIANO CASTILLO COLONNA | Control de accesos, roles, trazabilidad e integraciones.
                     </p>
                   </div>
 
@@ -6443,7 +6443,7 @@ export default function App() {
                   <h3 className="text-base font-bold text-slate-900">
                     Evento de Auditoría #{selectedAuditLog.id}
                   </h3>
-                  <p className="text-[11px] text-slate-400">Trazabilidad de seguridad DIRESA Piura</p>
+                  <p className="text-[11px] text-slate-400">Trazabilidad de seguridad DIRECCION SUB REGIONAL DE SALUD LUCIANO CASTILLO COLONNA</p>
                 </div>
               </div>
               <button
