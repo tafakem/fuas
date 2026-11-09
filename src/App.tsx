@@ -4959,23 +4959,36 @@ export default function App() {
 
                   {/* Previsualizaciones del OCR */}
                   {packageForm.foto_etiqueta && (
-                    <div className="flex items-center gap-3 p-2 bg-white rounded-lg border border-purple-200">
-                      <img
-                        src={packageForm.foto_etiqueta}
-                        alt="Foto Etiqueta Capturada"
-                        className="w-16 h-16 object-cover rounded-md border border-slate-200"
-                      />
-                      <div className="flex-1 text-[11px]">
-                        <p className="font-semibold text-slate-800">Fotografía de la etiqueta adjuntada</p>
-                        <p className="text-slate-500">Imagen guardada junto con la información del paquete.</p>
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 bg-white rounded-xl border border-purple-200 shadow-sm">
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={packageForm.foto_etiqueta}
+                          alt="Foto Etiqueta Capturada"
+                          className="w-16 h-16 object-cover rounded-lg border border-purple-200 shadow-xs"
+                        />
+                        <div className="text-[11px]">
+                          <p className="font-bold text-purple-950">Fotografía de la Etiqueta Adjunta</p>
+                          <p className="text-slate-500">Imagen guardada para expediente e inspección física.</p>
+                        </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => setPackageForm({ ...packageForm, foto_etiqueta: '' })}
-                        className="text-xs text-rose-600 hover:text-rose-800 font-medium underline"
-                      >
-                        Quitar
-                      </button>
+                      <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                        <button
+                          type="button"
+                          disabled={isScanningOCR}
+                          onClick={() => processOCRWithBase64(packageForm.foto_etiqueta)}
+                          className="px-3 py-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold rounded-lg text-xs shadow flex items-center gap-1.5 transition-all"
+                        >
+                          {isScanningOCR ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <QrCode className="w-3.5 h-3.5" />}
+                          ⚡ Analizar y Extraer Datos (OCR IA)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPackageForm({ ...packageForm, foto_etiqueta: '' })}
+                          className="px-2.5 py-1.5 text-xs text-rose-600 hover:bg-rose-50 rounded-lg font-semibold transition-colors"
+                        >
+                          Quitar Foto
+                        </button>
+                      </div>
                     </div>
                   )}
 
