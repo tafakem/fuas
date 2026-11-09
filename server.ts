@@ -372,8 +372,11 @@ app.post('/api/auth/login', (req, res) => {
 // Get Users
 app.get('/api/users', (req, res) => {
   try {
-    const users = db.prepare('id, username, nombre_completo, role, permissions, activo, created_at FROM users').all();
-    const formatted = users.map((u: any) => ({ ...u, permissions: JSON.parse(u.permissions) }));
+    const users = db.prepare('SELECT id, username, nombre_completo, role, permissions, activo, created_at FROM users ORDER BY id ASC').all();
+    const formatted = users.map((u: any) => ({
+      ...u,
+      permissions: typeof u.permissions === 'string' ? JSON.parse(u.permissions || '{}') : (u.permissions || {})
+    }));
     res.json(formatted);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -388,18 +391,18 @@ app.post('/api/users', (req, res) => {
       if (password) {
         const hash = bcrypt.hashSync(password, 10);
         db.prepare('UPDATE users SET username = ?, password_hash = ?, nombre_completo = ?, role = ?, permissions = ?, activo = ? WHERE id = ?').run(
-          username, hash, nombre_completo, role, JSON.stringify(permissions), activo ? 1 : 0, id
+          username, hash, nombre_completo, role, JSON.stringify(permissions), activo !== undefined ? (activo ? 1 : 0) : 1, id
         );
       } else {
         db.prepare('UPDATE users SET username = ?, nombre_completo = ?, role = ?, permissions = ?, activo = ? WHERE id = ?').run(
-          username, nombre_completo, role, JSON.stringify(permissions), activo ? 1 : 0, id
+          username, nombre_completo, role, JSON.stringify(permissions), activo !== undefined ? (activo ? 1 : 0) : 1, id
         );
       }
       logAudit(null, admin_username, 'UPDATE_USER', `Actualizó usuario ${username}`, req.ip || '127.0.0.1');
     } else {
-      const hash = bcrypt.hashSync(password || 'temp123', 10);
-      db.prepare('INSERT INTO users (username, password_hash, nombre_completo, role, permissions, activo) VALUES (?, ?, ?, ?, ?, 1)').run(
-        username, hash, nombre_completo, role || 'user', JSON.stringify(permissions || {})
+      const hash = bcrypt.hashSync(password || 'diresa2026', 10);
+      db.prepare('INSERT INTO users (username, password_hash, nombre_completo, role, permissions, activo) VALUES (?, ?, ?, ?, ?, ?)').run(
+        username, hash, nombre_completo, role || 'user', JSON.stringify(permissions || {}), activo !== undefined ? (activo ? 1 : 0) : 1
       );
       logAudit(null, admin_username, 'CREATE_USER', `Creó usuario ${username}`, req.ip || '127.0.0.1');
     }
@@ -409,10 +412,59 @@ app.post('/api/users', (req, res) => {
   }
 });
 
-// Audit Logs
+// Toggle User Active Status
+app.put('/api/users/:id/toggle-status', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { admin_username } = req.body;
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id) as any;
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado' });
+    if (user.username === 'admin') {
+      return res.status(400).json({ error: 'No se puede desactivar la cuenta del Administrador Principal' });
+    }
+    const newStatus = user.activo === 1 ? 0 : 1;
+    db.prepare('UPDATE users SET activo = ? WHERE id = ?').run(newStatus, id);
+    logAudit(null, admin_username || 'admin', 'TOGGLE_USER_STATUS', `${newStatus === 1 ? 'Activó' : 'Desactivó'} al usuario ${user.username}`, req.ip || '127.0.0.1');
+    res.json({ success: true, activo: newStatus });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Audit Logs (with search, date, action, and user filters)
 app.get('/api/audit-logs', (req, res) => {
   try {
-    const logs = db.prepare('SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 100').all();
+    const { action, username, search, start_date, end_date, limit } = req.query;
+    let query = 'SELECT * FROM audit_logs WHERE 1=1';
+    const params: any[] = [];
+
+    if (action && action !== 'todos') {
+      query += ' AND action = ?';
+      params.push(action);
+    }
+    if (username && username !== 'todos') {
+      query += ' AND username = ?';
+      params.push(username);
+    }
+    if (start_date) {
+      query += ' AND created_at >= ?';
+      params.push(`${start_date} 00:00:00`);
+    }
+    if (end_date) {
+      query += ' AND created_at <= ?';
+      params.push(`${end_date} 23:59:59`);
+    }
+    if (search) {
+      query += ' AND (action LIKE ? OR details LIKE ? OR username LIKE ? OR ip_address LIKE ?)';
+      const s = `%${search}%`;
+      params.push(s, s, s, s);
+    }
+
+    query += ' ORDER BY created_at DESC';
+    const maxLimit = limit ? parseInt(String(limit)) : 500;
+    query += ` LIMIT ${maxLimit}`;
+
+    const logs = db.prepare(query).all(...params);
     res.json(logs);
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -1292,34 +1344,130 @@ app.delete('/api/receptions/:id', (req, res) => {
       if (!rec) throw new Error('Recepción no encontrada');
 
       if (rec.range_start && rec.range_end) {
-        // FUA reception: update inventory_stock status back or delete block
-        db.prepare(`
-          UPDATE inventory_stock 
-          SET estado = 'disponible' 
-          WHERE establishment_id = ? AND range_start = ? AND range_end = ? AND estado = 'entregado'
-        `).run(rec.establishment_id, rec.range_start, rec.range_end);
+        const rStart = parseInt(rec.range_start);
+        const rEnd = parseInt(rec.range_end);
 
-        db.prepare(`
-          INSERT INTO inventory_movements (establishment_id, product_id, batch_id, tipo, cantidad, range_start, range_end, referencia, user_id)
-          VALUES (?, (SELECT id FROM products WHERE tipo = 'fua' LIMIT 1), ?, 'reversion_recepcion', ?, ?, ?, ?, NULL)
-        `).run(rec.establishment_id, rec.batch_id, rec.cantidad_recibida, rec.range_start, rec.range_end, `Anulación Recepción #${id}`);
-      } else {
-        // Non-correlative reception (HIS, HC, etc.): decrease product stock
-        const fuaProd = db.prepare("SELECT id FROM products WHERE tipo = 'fua' LIMIT 1").get() as { id: number };
-        // Wait, non-FUA product is stored in receptions without range. Let's find product from inventory movements or stock
-        const mov = db.prepare("SELECT product_id FROM inventory_movements WHERE establishment_id = ? AND tipo = 'recepcion' ORDER BY id DESC LIMIT 1").get(rec.establishment_id) as any;
-        if (mov && mov.product_id) {
-          db.prepare('UPDATE products SET stock_total = MAX(0, stock_total - ?), stock_disponible = MAX(0, stock_disponible - ?) WHERE id = ?').run(rec.cantidad_recibida, rec.cantidad_recibida, mov.product_id);
-          db.prepare('UPDATE inventory_stock SET stock_actual = MAX(0, stock_actual - ?) WHERE establishment_id = ? AND product_id = ? AND range_start IS NULL').run(rec.cantidad_recibida, rec.establishment_id, mov.product_id);
+        // Check if QR package has been delivered/consumed
+        const pkg = db.prepare(`
+          SELECT * FROM warehouse_packages 
+          WHERE (establishment_id = ? OR (establishment_id IS NULL AND ? IS NULL))
+            AND (
+              (CAST(range_start AS INTEGER) = ? AND CAST(range_end AS INTEGER) = ?)
+              OR (range_start = ? AND range_end = ?)
+            )
+        `).get(rec.establishment_id, rec.establishment_id, rStart, rEnd, String(rec.range_start), String(rec.range_end)) as any;
+
+        if (pkg && pkg.saldo < pkg.cantidad_inicial) {
+          throw new Error(`No se puede eliminar la recepción doc. "${rec.documento || '#' + id}" porque el paquete QR (${pkg.codigo_paquete}) ya registra entregas o salidas de FUAs. Anule primero las entregas asociadas.`);
         }
+
+        // Check if delivery items exist in this range
+        const delItem = db.prepare(`
+          SELECT di.id FROM delivery_items di
+          JOIN deliveries d ON di.delivery_id = d.id
+          WHERE (d.establishment_id = ? OR (d.establishment_id IS NULL AND ? IS NULL))
+            AND CAST(di.range_start AS INTEGER) <= ? 
+            AND CAST(di.range_end AS INTEGER) >= ?
+        `).get(rec.establishment_id, rec.establishment_id, rEnd, rStart) as any;
+
+        if (delItem) {
+          throw new Error(`No se puede eliminar la recepción doc. "${rec.documento || '#' + id}" porque existen entregas realizadas en el rango ${rStart}-${rEnd}. Anule primero las entregas asociadas.`);
+        }
+
+        // Delete block from inventory_stock so it is no longer available
+        db.prepare(`
+          DELETE FROM inventory_stock 
+          WHERE (establishment_id = ? OR (establishment_id IS NULL AND ? IS NULL))
+            AND (
+              (CAST(range_start AS INTEGER) = ? AND CAST(range_end AS INTEGER) = ?)
+              OR (range_start = ? AND range_end = ?)
+            )
+        `).run(rec.establishment_id, rec.establishment_id, rStart, rEnd, String(rec.range_start), String(rec.range_end));
+
+        // Delete generated QR package from warehouse_packages
+        db.prepare(`
+          DELETE FROM warehouse_packages 
+          WHERE (establishment_id = ? OR (establishment_id IS NULL AND ? IS NULL))
+            AND (
+              (CAST(range_start AS INTEGER) = ? AND CAST(range_end AS INTEGER) = ?)
+              OR (range_start = ? AND range_end = ?)
+            )
+        `).run(rec.establishment_id, rec.establishment_id, rStart, rEnd, String(rec.range_start), String(rec.range_end));
+
+        // Insert reversal movement into inventory_movements
+        const fuaProd = db.prepare("SELECT id FROM products WHERE tipo = 'fua' LIMIT 1").get() as { id: number };
+        if (fuaProd) {
+          db.prepare(`
+            INSERT INTO inventory_movements (establishment_id, product_id, batch_id, tipo, cantidad, range_start, range_end, referencia, user_id)
+            VALUES (?, ?, ?, 'reversion_recepcion', ?, ?, ?, ?, NULL)
+          `).run(
+            rec.establishment_id,
+            fuaProd.id,
+            rec.batch_id,
+            rec.cantidad_recibida,
+            rec.range_start,
+            rec.range_end,
+            `Eliminación/Anulación Recepción Doc: ${rec.documento || 'S/N'}`
+          );
+        }
+      } else {
+        // Non-correlative format reception
+        let prodId = rec.product_id;
+        if (!prodId) {
+          const mov = db.prepare("SELECT product_id FROM inventory_movements WHERE establishment_id = ? AND tipo = 'recepcion' ORDER BY id DESC LIMIT 1").get(rec.establishment_id) as any;
+          if (mov) prodId = mov.product_id;
+        }
+
+        if (prodId) {
+          // Reduce stock in products table
+          db.prepare(`
+            UPDATE products 
+            SET stock_total = MAX(0, COALESCE(stock_total, 0) - ?), 
+                stock_disponible = MAX(0, COALESCE(stock_disponible, 0) - ?) 
+            WHERE id = ?
+          `).run(rec.cantidad_recibida, rec.cantidad_recibida, prodId);
+
+          // Reduce stock in inventory_stock table or delete row if 0
+          const stRow = db.prepare(`
+            SELECT id, stock_actual FROM inventory_stock 
+            WHERE (establishment_id = ? OR (establishment_id IS NULL AND ? IS NULL)) 
+              AND product_id = ? 
+              AND range_start IS NULL
+          `).get(rec.establishment_id, rec.establishment_id, prodId) as any;
+
+          if (stRow) {
+            const newStock = Math.max(0, stRow.stock_actual - rec.cantidad_recibida);
+            if (newStock === 0) {
+              db.prepare('DELETE FROM inventory_stock WHERE id = ?').run(stRow.id);
+            } else {
+              db.prepare('UPDATE inventory_stock SET stock_actual = ? WHERE id = ?').run(newStock, stRow.id);
+            }
+          }
+
+          // Insert reversal movement
+          db.prepare(`
+            INSERT INTO inventory_movements (establishment_id, product_id, batch_id, tipo, cantidad, referencia, user_id)
+            VALUES (?, ?, ?, 'reversion_recepcion', ?, ?, NULL)
+          `).run(rec.establishment_id, prodId, rec.batch_id, rec.cantidad_recibida, `Eliminación/Anulación Recepción Doc: ${rec.documento || 'S/N'}`);
+        }
+
+        // Delete generated package if present
+        db.prepare(`
+          DELETE FROM warehouse_packages 
+          WHERE (establishment_id = ? OR (establishment_id IS NULL AND ? IS NULL))
+            AND ubicacion_almacen LIKE ?
+            AND range_start IS NULL
+        `).run(rec.establishment_id, rec.establishment_id, `%Recepción Doc: ${rec.documento}%`);
       }
 
+      // Finally delete the reception record
       db.prepare('DELETE FROM receptions WHERE id = ?').run(id);
-      logAudit(null, username, 'DELETE_RECEPTION', `Eliminó recepción #${id} y restituyó stock/FUAs`, req.ip || '127.0.0.1');
+
+      logAudit(null, username, 'DELETE_RECEPTION', `Eliminó recepción #${id} (Doc: ${rec.documento || 'S/N'}, Cantidad: ${rec.cantidad_recibida} u.) y eliminó del inventario y stock disponible`, req.ip || '127.0.0.1');
     });
 
     transaction();
-    res.json({ success: true });
+    res.json({ success: true, message: `Recepción #${id} eliminada y stock descontado del inventario` });
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }

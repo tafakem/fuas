@@ -891,9 +891,39 @@ export default function App() {
   const [showProdModal, setShowProdModal] = useState(false);
   const [prodForm, setProdForm] = useState({ id: null, codigo: '', nombre: '', tipo: 'otro', unidad_control: 'blocks', hojas_por_block: 50, stock_total: 0, stock_disponible: 0, activo: 1 });
 
-  // User Modal
+  // User Modal & Sub-tabs
   const [showUserModal, setShowUserModal] = useState(false);
-  const [userForm, setUserForm] = useState({ id: null, username: '', password: '', nombre_completo: '', role: 'user', permissions: { consultar: true, registrar: true, modificar: false, anular: false, importar: false, reportes: true } });
+  const [userForm, setUserForm] = useState<any>({
+    id: null,
+    username: '',
+    password: '',
+    nombre_completo: '',
+    role: 'user',
+    activo: 1,
+    permissions: {
+      consultar: true,
+      registrar: true,
+      modificar: false,
+      anular: false,
+      importar: false,
+      reportes: true
+    }
+  });
+  const [userSubTab, setUserSubTab] = useState<'users' | 'audit' | 'apiperu'>('users');
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [userRoleFilter, setUserRoleFilter] = useState('todos');
+  const [userStatusFilter, setUserStatusFilter] = useState('todos');
+  const [usersPage, setUsersPage] = useState(1);
+  const [usersPageSize, setUsersPageSize] = useState(25);
+
+  const [auditSearchQuery, setAuditSearchQuery] = useState('');
+  const [auditUserFilter, setAuditUserFilter] = useState('todos');
+  const [auditActionFilter, setAuditActionFilter] = useState('todos');
+  const [auditStartDate, setAuditStartDate] = useState('');
+  const [auditEndDate, setAuditEndDate] = useState('');
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditPageSize, setAuditPageSize] = useState(25);
+  const [selectedAuditLog, setSelectedAuditLog] = useState<any | null>(null);
 
   // API Perú Settings state (Admin Only)
   const [apiPeruTokenInput, setApiPeruTokenInput] = useState('');
@@ -1301,6 +1331,173 @@ export default function App() {
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Reporte');
     XLSX.writeFile(workbook, `${filename}.xlsx`);
     showToast('Reporte exportado a Excel con éxito');
+  };
+
+  // Exportar Inventario y Stock a PDF Institucional
+  const exportInventoryToPDF = (stockList: any[]) => {
+    if (!stockList || stockList.length === 0) {
+      showToast('No hay registros de inventario para exportar', 'error');
+      return;
+    }
+    const doc = new jsPDF('landscape');
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    // Encabezado institucional
+    doc.setFontSize(13);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
+    doc.text('DIRESA PIURA - SUB REGIÓN DE SALUD LUCIANO CASTILLO COLONNA', pageWidth / 2, 14, { align: 'center' });
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105);
+    doc.text('SISTEMA DE GESTIÓN Y ALMACÉN DE FORMATOS ÚNICOS DE ATENCIÓN (FUA)', pageWidth / 2, 20, { align: 'center' });
+
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    doc.text('REPORTE OFICIAL DE INVENTARIO Y STOCK DISPONIBLE', pageWidth / 2, 27, { align: 'center' });
+
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Fecha de emisión: ${new Date().toLocaleString()} | Usuario emisor: ${currentUser?.username || 'admin'} | Total registros: ${stockList.length}`, pageWidth / 2, 33, { align: 'center' });
+
+    const rows = stockList.map(inv => [
+      inv.establishment_nombre ? `${inv.establishment_nombre} (RENAES: ${inv.renaes || '—'})` : 'Almacén Central',
+      inv.product_nombre || 'Formato FUA',
+      inv.batch_codigo ? `Lote ${inv.batch_codigo}` : 'General',
+      inv.range_start ? `Del ${inv.range_start} al ${inv.range_end}` : `Stock General`,
+      inv.stock_actual ?? 0,
+      (inv.estado || 'disponible').toUpperCase()
+    ]);
+
+    autoTable(doc, {
+      startY: 37,
+      head: [['Establecimiento (IPRESS / RENAES)', 'Producto / Formato', 'Lote', 'Rangos FUA / Detalle Stock', 'Stock Actual', 'Estado']],
+      body: rows,
+      theme: 'grid',
+      headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+      bodyStyles: { fontSize: 8, textColor: [51, 65, 85] },
+      columnStyles: {
+        0: { cellWidth: 70 },
+        1: { cellWidth: 60 },
+        2: { cellWidth: 26 },
+        3: { cellWidth: 55 },
+        4: { cellWidth: 25, halign: 'center', fontStyle: 'bold' },
+        5: { cellWidth: 25, halign: 'center' }
+      },
+      margin: { left: 12, right: 12 }
+    });
+
+    doc.save(`Reporte_Inventario_Stock_${new Date().toISOString().substring(0, 10)}.pdf`);
+    showToast('✅ Reporte de inventario generado en PDF');
+  };
+
+  // Exportar Auditoría a Excel
+  const exportAuditToExcel = (logs: any[]) => {
+    if (!logs || logs.length === 0) {
+      showToast('No hay registros de auditoría para exportar', 'error');
+      return;
+    }
+    const data = logs.map(l => ({
+      'ID': l.id,
+      'Fecha y Hora': l.created_at,
+      'Usuario': l.username,
+      'Acción Realizada': l.action,
+      'Detalles de la Operación': l.details,
+      'Dirección IP': l.ip_address || '127.0.0.1'
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Auditoria_DIRESA');
+    XLSX.writeFile(workbook, `Registro_Auditoria_${new Date().toISOString().substring(0, 10)}.xlsx`);
+    showToast('✅ Registro de auditoría exportado a Excel');
+  };
+
+  // Exportar Auditoría a PDF Institucional
+  const exportAuditToPDF = (logs: any[]) => {
+    if (!logs || logs.length === 0) {
+      showToast('No hay registros de auditoría para exportar', 'error');
+      return;
+    }
+    const doc = new jsPDF('landscape');
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    // Encabezado institucional
+    doc.setFontSize(13);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(15, 23, 42);
+    doc.text('DIRESA PIURA - SUB REGIÓN DE SALUD LUCIANO CASTILLO COLONNA', pageWidth / 2, 14, { align: 'center' });
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(71, 85, 105);
+    doc.text('SISTEMA DE GESTIÓN Y ALMACÉN DE FORMATOS ÚNICOS DE ATENCIÓN (FUA)', pageWidth / 2, 20, { align: 'center' });
+
+    doc.setFontSize(11);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 41, 59);
+    doc.text('REPORTE OFICIAL DE AUDITORÍA Y TRAZABILIDAD DE ACCIONES', pageWidth / 2, 27, { align: 'center' });
+
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Fecha de emisión: ${new Date().toLocaleString()} | Usuario emisor: ${currentUser?.username || 'admin'} | Total registros: ${logs.length}`, pageWidth / 2, 33, { align: 'center' });
+
+    const rows = logs.slice(0, 400).map(l => [
+      l.id,
+      l.created_at?.substring(0, 19) || '-',
+      l.username,
+      l.action,
+      l.details,
+      l.ip_address || '127.0.0.1'
+    ]);
+
+    autoTable(doc, {
+      startY: 37,
+      head: [['ID', 'Fecha / Hora', 'Usuario', 'Acción', 'Detalle de la Operación', 'IP']],
+      body: rows,
+      theme: 'grid',
+      headStyles: { fillColor: [30, 58, 138], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+      bodyStyles: { fontSize: 7, textColor: [51, 65, 85] },
+      columnStyles: {
+        0: { cellWidth: 14 },
+        1: { cellWidth: 32 },
+        2: { cellWidth: 26, fontStyle: 'bold' },
+        3: { cellWidth: 35, fontStyle: 'bold' },
+        4: { cellWidth: 'auto' },
+        5: { cellWidth: 24 }
+      },
+      margin: { left: 12, right: 12 }
+    });
+
+    doc.save(`Reporte_Auditoria_${new Date().toISOString().substring(0, 10)}.pdf`);
+    showToast('✅ Reporte de auditoría generado en PDF');
+  };
+
+  // Alternar estado activo de un usuario
+  const handleToggleUserStatus = async (user: any) => {
+    if (user.username === 'admin') {
+      showToast('No se puede desactivar la cuenta del Administrador Principal', 'error');
+      return;
+    }
+    try {
+      const res = await fetch(`/api/users/${user.id}/toggle-status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin_username: currentUser.username })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(`✅ Estado de ${user.username}: ${data.activo === 1 ? 'Activo' : 'Inactivo'}`);
+        loadData();
+      } else {
+        showToast(data.error || 'Error al actualizar estado', 'error');
+      }
+    } catch (e: any) {
+      showToast('Error de conexión', 'error');
+    }
   };
 
   if (!currentUser) {
@@ -2481,13 +2678,14 @@ export default function App() {
                                     <button
                                       type="button"
                                       onClick={async () => {
-                                        if (confirm(`¿Eliminar la recepción doc. ${r.documento}?`)) {
+                                        if (confirm(`¿Confirma eliminar la recepción doc. "${r.documento}" (${r.cantidad_recibida} u.)?\n\nEsta acción eliminará los FUAs/Formatos del Inventario y Stock disponible, y anulará su paquete QR.`)) {
                                           const res = await fetch(`/api/receptions/${r.id}?username=${currentUser.username}`, { method: 'DELETE' });
+                                          const data = await res.json();
                                           if (res.ok) {
-                                            showToast('Recepción eliminada');
+                                            showToast('✅ Recepción eliminada y stock descontado del inventario disponible');
                                             loadData();
                                           } else {
-                                            showToast('Error al eliminar', 'error');
+                                            showToast(data.error || 'Error al eliminar la recepción', 'error');
                                           }
                                         }
                                       }}
@@ -2527,12 +2725,21 @@ export default function App() {
                 <h2 className="text-xl font-bold text-slate-900">Inventario y Stock Disponible (FUAs y Otros Formatos)</h2>
                 <p className="text-xs text-slate-500 mt-1">Control integral de existencias por IPRESS para todos los formatos de salud.</p>
               </div>
-              <button
-                onClick={() => exportToExcel(inventoryStock, 'inventario_diresa')}
-                className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition-colors"
-              >
-                <Download className="w-4 h-4" /> Exportar Inventario
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => exportInventoryToPDF(inventoryStock)}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-semibold rounded-xl text-xs shadow-sm transition-all"
+                  title="Generar reporte PDF oficial de existencias actuales"
+                >
+                  <FileText className="w-4 h-4" /> Exportar a PDF
+                </button>
+                <button
+                  onClick={() => exportToExcel(inventoryStock, 'inventario_diresa')}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs transition-colors"
+                >
+                  <Download className="w-4 h-4" /> Exportar Excel
+                </button>
+              </div>
             </div>
 
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
@@ -3928,232 +4135,859 @@ export default function App() {
         })()}
 
         {/* --- 11. USUARIOS & AUDITORÍA (ADMIN) --- */}
-        {activeTab === 'users' && currentUser.role === 'admin' && (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-              <div>
-                <h2 className="text-xl font-bold text-slate-900">Gestión de Usuarios y Auditoría</h2>
-                <p className="text-xs text-slate-500 mt-1">Control de accesos, permisos y registro de auditoría de acciones del sistema.</p>
-              </div>
-              <button
-                onClick={() => {
-                  setUserForm({ id: null, username: '', password: '', nombre_completo: '', role: 'user', permissions: { consultar: true, registrar: true, modificar: false, anular: false, importar: false, reportes: true } });
-                  setShowUserModal(true);
-                }}
-                className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-xs shadow-md shadow-blue-600/20"
-              >
-                <Plus className="w-4 h-4" /> Nuevo Usuario
-              </button>
-            </div>
+        {activeTab === 'users' && currentUser.role === 'admin' && (() => {
+          // Filtrado de usuarios
+          const filteredUsers = usersList.filter((u: any) => {
+            if (userRoleFilter !== 'todos' && u.role !== userRoleFilter) return false;
+            if (userStatusFilter === 'activos' && u.activo !== 1) return false;
+            if (userStatusFilter === 'inactivos' && u.activo === 1) return false;
+            if (userSearchQuery) {
+              const q = userSearchQuery.toLowerCase();
+              const uMatch = (u.username || '').toLowerCase().includes(q);
+              const nMatch = (u.nombre_completo || '').toLowerCase().includes(q);
+              if (!uMatch && !nMatch) return false;
+            }
+            return true;
+          });
+          const totalUserPages = Math.ceil(filteredUsers.length / usersPageSize) || 1;
+          const paginatedUsers = filteredUsers.slice((usersPage - 1) * usersPageSize, usersPage * usersPageSize);
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <h3 className="text-base font-bold text-slate-900 mb-4">Usuarios del Sistema</h3>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr className="border-b border-slate-200 text-slate-500 uppercase">
-                        <th className="pb-3">Usuario</th>
-                        <th className="pb-3">Nombre Completo</th>
-                        <th className="pb-3">Rol</th>
-                        <th className="pb-3 text-right">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {usersList.map((u: any) => (
-                        <tr key={u.id} className="hover:bg-slate-50">
-                          <td className="py-3 font-mono font-bold text-blue-600">{u.username}</td>
-                          <td className="py-3 font-medium text-slate-900">{u.nombre_completo}</td>
-                          <td className="py-3">
-                            <span className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded-full text-[10px] font-semibold uppercase">{u.role}</span>
-                          </td>
-                          <td className="py-3 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={() => { setUserForm(u); setShowUserModal(true); }}
-                                className="p-1 bg-slate-100 hover:bg-blue-600 hover:text-white rounded text-slate-600"
-                                title="Editar"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                              {u.username !== 'admin' && (
-                                <button
-                                  onClick={async () => {
-                                    if (confirm(`¿Eliminar al usuario ${u.username}?`)) {
-                                      const res = await fetch(`/api/users/${u.id}?username=${currentUser.username}`, { method: 'DELETE' });
-                                      if (res.ok) {
-                                        showToast('Usuario eliminado');
-                                        loadData();
-                                      } else {
-                                        showToast('Error al eliminar', 'error');
-                                      }
-                                    }
-                                  }}
-                                  className="p-1 bg-red-50 hover:bg-red-600 hover:text-white text-red-600 rounded"
-                                  title="Eliminar"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+          // Filtrado de auditoría
+          const filteredAuditLogs = auditLogs.filter((log: any) => {
+            if (auditActionFilter !== 'todos' && log.action !== auditActionFilter) return false;
+            if (auditUserFilter !== 'todos' && log.username !== auditUserFilter) return false;
+            if (auditStartDate && log.created_at && log.created_at.substring(0, 10) < auditStartDate) return false;
+            if (auditEndDate && log.created_at && log.created_at.substring(0, 10) > auditEndDate) return false;
+            if (auditSearchQuery) {
+              const q = auditSearchQuery.toLowerCase();
+              const actionMatch = (log.action || '').toLowerCase().includes(q);
+              const userMatch = (log.username || '').toLowerCase().includes(q);
+              const detailsMatch = (log.details || '').toLowerCase().includes(q);
+              const ipMatch = (log.ip_address || '').toLowerCase().includes(q);
+              if (!actionMatch && !userMatch && !detailsMatch && !ipMatch) return false;
+            }
+            return true;
+          });
+          const totalAuditPages = Math.ceil(filteredAuditLogs.length / auditPageSize) || 1;
+          const paginatedAuditLogs = filteredAuditLogs.slice((auditPage - 1) * auditPageSize, auditPage * auditPageSize);
 
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <h3 className="text-base font-bold text-slate-900 mb-4">Registro de Auditoría</h3>
-                <div className="overflow-x-auto max-h-96">
-                  <table className="w-full text-left text-xs">
-                    <thead>
-                      <tr className="border-b border-slate-200 text-slate-500 uppercase">
-                        <th className="pb-3">Fecha</th>
-                        <th className="pb-3">Usuario</th>
-                        <th className="pb-3">Acción</th>
-                        <th className="pb-3">Detalle</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {auditLogs.map((log: any) => (
-                        <tr key={log.id} className="hover:bg-slate-50">
-                          <td className="py-2.5 text-slate-500">{log.created_at?.substring(0, 19)}</td>
-                          <td className="py-2.5 font-bold text-slate-700">{log.username}</td>
-                          <td className="py-2.5 font-mono text-blue-600">{log.action}</td>
-                          <td className="py-2.5 text-slate-600">{log.details}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+          // Listas dinámicas para filtros de auditoría
+          const distinctAuditActions = Array.from(new Set(auditLogs.map((l: any) => l.action).filter(Boolean))).sort();
+          const distinctAuditUsers = Array.from(new Set(auditLogs.map((l: any) => l.username).filter(Boolean))).sort();
 
-              {/* Configuración del Token de API Perú (Solo Administrador) */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 lg:col-span-2 space-y-4">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-100 pb-3">
+          // Estadísticas para usuarios
+          const activeUsersCount = usersList.filter((u: any) => u.activo === 1 || u.activo === true).length;
+          const adminUsersCount = usersList.filter((u: any) => u.role === 'admin').length;
+          const standardUsersCount = usersList.filter((u: any) => u.role !== 'admin').length;
+
+          // Estadísticas para auditoría
+          const todayDateStr = new Date().toISOString().substring(0, 10);
+          const todayLogsCount = auditLogs.filter((l: any) => l.created_at && l.created_at.startsWith(todayDateStr)).length;
+          const loginLogsCount = auditLogs.filter((l: any) => (l.action || '').includes('LOGIN')).length;
+          const warehouseLogsCount = auditLogs.filter((l: any) => (l.action || '').includes('RECEPTION') || (l.action || '').includes('DELIVERY') || (l.action || '').includes('PACKAGE')).length;
+
+          return (
+            <div className="space-y-6">
+              {/* Header con Sub-Pestañas */}
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-5">
                   <div>
-                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                      <Key className="w-5 h-5 text-amber-500" /> Configuración de Integración API Perú (Consultas DNI)
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      Solo visible para Administradores. Configure su Token Bearer otorgado por API Perú (apiperu.dev) para la búsqueda automática de personal por DNI.
+                    <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                      <Shield className="w-6 h-6 text-blue-600" />
+                      Módulo de Usuarios, Seguridad y Auditoría
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-1">
+                      DIRESA Piura — Sub Región de Salud Luciano Castillo Colonna | Control de accesos, roles, trazabilidad e integraciones.
                     </p>
                   </div>
-                  <span className="px-2.5 py-1 bg-amber-100 text-amber-900 font-bold font-mono text-[10px] rounded-lg flex items-center gap-1 shrink-0">
-                    <Lock className="w-3 h-3 text-amber-700" /> Exclusivo Administrador
-                  </span>
+
+                  {userSubTab === 'users' && (
+                    <button
+                      onClick={() => {
+                        setUserForm({
+                          id: null,
+                          username: '',
+                          password: '',
+                          nombre_completo: '',
+                          role: 'user',
+                          activo: true,
+                          permissions: { consultar: true, registrar: true, modificar: false, anular: false, importar: false, reportes: true }
+                        });
+                        setShowUserModal(true);
+                      }}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl text-xs shadow-md shadow-blue-600/20 transition-all shrink-0"
+                    >
+                      <Plus className="w-4 h-4" /> Nuevo Usuario
+                    </button>
+                  )}
+
+                  {userSubTab === 'audit' && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => exportAuditToExcel(filteredAuditLogs)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-xs shadow-sm transition-all"
+                        title="Exportar registros filtrados a Excel"
+                      >
+                        <FileSpreadsheet className="w-3.5 h-3.5" /> Exportar Excel
+                      </button>
+                      <button
+                        onClick={() => exportAuditToPDF(filteredAuditLogs)}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white font-semibold rounded-xl text-xs shadow-sm transition-all"
+                        title="Generar reporte PDF oficial de auditoría"
+                      >
+                        <FileText className="w-3.5 h-3.5" /> Reporte PDF
+                      </button>
+                      <button
+                        onClick={() => {
+                          loadData();
+                          showToast('Actualizando bitácora de auditoría...');
+                        }}
+                        className="p-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-semibold"
+                        title="Recargar datos"
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                 </div>
 
-                <form onSubmit={async (e) => {
-                  e.preventDefault();
-                  setIsSavingToken(true);
-                  try {
-                    const res = await fetch('/api/settings/apiperu', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ token: apiPeruTokenInput, username: currentUser.username })
-                    });
-                    const data = await res.json();
-                    if (res.ok) {
-                      showToast('✅ Token de API Perú actualizado correctamente');
-                      loadData();
-                    } else {
-                      showToast(data.error || 'Error al guardar el Token', 'error');
-                    }
-                  } catch (err: any) {
-                    showToast('Error de conexión', 'error');
-                  } finally {
-                    setIsSavingToken(false);
-                  }
-                }} className="space-y-4">
-                  
-                  <div>
-                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
-                      Clave Token de API Perú (Bearer Token)
-                    </label>
-                    <div className="flex flex-col sm:flex-row gap-2">
-                      <input
-                        type="text"
-                        required
-                        value={apiPeruTokenInput}
-                        onChange={e => setApiPeruTokenInput(e.target.value)}
-                        className="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 font-mono focus:ring-2 focus:ring-amber-500"
-                        placeholder="Ingrese su Token Bearer de API Perú (ej. f022c3c042cba713a65e69d8ab9299c...)"
-                      />
-                      <button
-                        type="submit"
-                        disabled={isSavingToken}
-                        className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-semibold rounded-xl text-xs shadow flex items-center justify-center gap-2 transition-colors shrink-0"
-                      >
-                        {isSavingToken ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-                        Guardar Token
-                      </button>
+                {/* Botones de Navegación entre Sub-Pestañas */}
+                <div className="flex flex-wrap gap-2 pt-4">
+                  <button
+                    onClick={() => setUserSubTab('users')}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-all ${
+                      userSubTab === 'users'
+                        ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <Users className="w-4 h-4" />
+                    <span>Usuarios del Sistema</span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      userSubTab === 'users' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                    }`}>
+                      {usersList.length}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setUserSubTab('audit')}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-all ${
+                      userSubTab === 'audit'
+                        ? 'bg-purple-600 text-white shadow-md shadow-purple-600/20'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <Shield className="w-4 h-4" />
+                    <span>Registro de Auditoría y Trazabilidad</span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      userSubTab === 'audit' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                    }`}>
+                      {auditLogs.length}
+                    </span>
+                  </button>
+
+                  <button
+                    onClick={() => setUserSubTab('apiperu')}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs transition-all ${
+                      userSubTab === 'apiperu'
+                        ? 'bg-amber-600 text-white shadow-md shadow-amber-600/20'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <Key className="w-4 h-4" />
+                    <span>Configuración API Perú / RENIEC</span>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      apiPeruTokenInput ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                    }`}>
+                      {apiPeruTokenInput ? 'Activo' : 'Pendiente'}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* ========================================================= */}
+              {/* SUB-PESTAÑA 1: GESTIÓN DE USUARIOS                        */}
+              {/* ========================================================= */}
+              {userSubTab === 'users' && (
+                <div className="space-y-6">
+                  {/* Tarjetas de Métricas de Usuarios */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Usuarios</p>
+                        <p className="text-2xl font-bold text-slate-900 mt-0.5">{usersList.length}</p>
+                      </div>
+                      <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                        <Users className="w-5 h-5" />
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Cuentas Activas</p>
+                        <p className="text-2xl font-bold text-emerald-600 mt-0.5">{activeUsersCount}</p>
+                      </div>
+                      <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                        <CheckCircle2 className="w-5 h-5" />
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Administradores</p>
+                        <p className="text-2xl font-bold text-purple-600 mt-0.5">{adminUsersCount}</p>
+                      </div>
+                      <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+                        <Shield className="w-5 h-5" />
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Operadores</p>
+                        <p className="text-2xl font-bold text-slate-700 mt-0.5">{standardUsersCount}</p>
+                      </div>
+                      <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center">
+                        <User className="w-5 h-5" />
+                      </div>
                     </div>
                   </div>
 
-                  {/* Probar Token */}
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
-                    <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                      <Search className="w-4 h-4 text-blue-600" /> Probar Funcionamiento del Token con un DNI
-                    </h4>
-                    <div className="flex flex-wrap items-center gap-2">
+                  {/* Barra de Filtros y Búsqueda de Usuarios */}
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+                    <div className="relative flex-1">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                       <input
                         type="text"
-                        maxLength={8}
-                        value={apiPeruTestDNI}
-                        onChange={e => setApiPeruTestDNI(e.target.value)}
-                        className="w-36 bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-mono"
-                        placeholder="8 dígitos"
+                        value={userSearchQuery}
+                        onChange={e => { setUserSearchQuery(e.target.value); setUsersPage(1); }}
+                        placeholder="Buscar por nombre de usuario o nombre completo..."
+                        className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
                       />
-                      <button
-                        type="button"
-                        disabled={isTestingToken || apiPeruTestDNI.length !== 8}
-                        onClick={async () => {
-                          setIsTestingToken(true);
-                          setApiPeruTestResult(null);
-                          try {
-                            const res = await fetch(`/api/external/dni/${apiPeruTestDNI}`);
-                            const data = await res.json();
-                            setApiPeruTestResult({ status: res.status, ...data });
-                          } catch (err: any) {
-                            setApiPeruTestResult({ error: 'Error de red o conexión' });
-                          } finally {
-                            setIsTestingToken(false);
-                          }
-                        }}
-                        className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-xl text-xs flex items-center gap-1.5 shadow-sm"
-                      >
-                        {isTestingToken ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
-                        Probar Consulta DNI
-                      </button>
                     </div>
 
-                    {apiPeruTestResult && (
-                      <div className={`p-3 rounded-xl border text-xs font-mono ${
-                        apiPeruTestResult.success ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-red-50 border-red-300 text-red-950'
-                      }`}>
-                        {apiPeruTestResult.success ? (
-                          <div>
-                            <p className="font-bold text-emerald-900">✅ Consulta Exitosa en API Perú:</p>
-                            <p className="mt-1">Nombres: <span className="font-bold">{apiPeruTestResult.nombres}</span></p>
-                            <p>Apellidos: <span className="font-bold">{apiPeruTestResult.apellidos}</span></p>
-                          </div>
-                        ) : (
-                          <div>
-                            <p className="font-bold text-red-950">❌ Error al consultar API Perú:</p>
-                            <p className="mt-0.5 text-[11px]">{apiPeruTestResult.error || 'No se pudo obtener datos con este Token'}</p>
-                          </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        value={userRoleFilter}
+                        onChange={e => { setUserRoleFilter(e.target.value); setUsersPage(1); }}
+                        className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="todos">Todos los Roles</option>
+                        <option value="admin">Solo Administradores</option>
+                        <option value="user">Solo Operadores</option>
+                      </select>
+
+                      <select
+                        value={userStatusFilter}
+                        onChange={e => { setUserStatusFilter(e.target.value); setUsersPage(1); }}
+                        className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="todos">Todos los Estados</option>
+                        <option value="activos">Solo Activos</option>
+                        <option value="inactivos">Solo Inactivos</option>
+                      </select>
+
+                      {(userSearchQuery || userRoleFilter !== 'todos' || userStatusFilter !== 'todos') && (
+                        <button
+                          onClick={() => {
+                            setUserSearchQuery('');
+                            setUserRoleFilter('todos');
+                            setUserStatusFilter('todos');
+                            setUsersPage(1);
+                          }}
+                          className="px-3 py-2 text-xs text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl font-semibold"
+                        >
+                          Limpiar
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Tabla de Usuarios */}
+                  <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 uppercase font-bold text-[11px] tracking-wider">
+                            <th className="py-3.5 px-4">Usuario</th>
+                            <th className="py-3.5 px-4">Nombre Completo y Cargo</th>
+                            <th className="py-3.5 px-4">Rol</th>
+                            <th className="py-3.5 px-4">Estado</th>
+                            <th className="py-3.5 px-4">Permisos Operativos</th>
+                            <th className="py-3.5 px-4 text-right">Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {paginatedUsers.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} className="py-10 text-center text-slate-400">
+                                <Users className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                                No se encontraron usuarios con los filtros especificados.
+                              </td>
+                            </tr>
+                          ) : (
+                            paginatedUsers.map((u: any) => {
+                              const perms = u.permissions || {};
+                              const isActive = u.activo === 1 || u.activo === true || u.activo === undefined;
+
+                              return (
+                                <tr key={u.id} className="hover:bg-slate-50/70 transition-colors">
+                                  <td className="py-3.5 px-4">
+                                    <div className="flex items-center gap-3">
+                                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+                                        u.role === 'admin' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+                                      }`}>
+                                        {u.username ? u.username.substring(0, 2).toUpperCase() : 'US'}
+                                      </div>
+                                      <div>
+                                        <p className="font-mono font-bold text-slate-900">{u.username}</p>
+                                        <p className="text-[10px] text-slate-400">ID #{u.id}</p>
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="py-3.5 px-4 font-medium text-slate-800">
+                                    {u.nombre_completo || '—'}
+                                  </td>
+                                  <td className="py-3.5 px-4">
+                                    <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                      u.role === 'admin'
+                                        ? 'bg-purple-100 text-purple-800 border border-purple-200'
+                                        : 'bg-blue-100 text-blue-800 border border-blue-200'
+                                    }`}>
+                                      {u.role === 'admin' ? <Shield className="w-3 h-3" /> : <User className="w-3 h-3" />}
+                                      {u.role === 'admin' ? 'Administrador' : 'Operador'}
+                                    </span>
+                                  </td>
+                                  <td className="py-3.5 px-4">
+                                    <button
+                                      type="button"
+                                      disabled={u.username === 'admin'}
+                                      onClick={() => handleToggleUserStatus(u)}
+                                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold transition-all ${
+                                        isActive
+                                          ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200 cursor-pointer'
+                                          : 'bg-rose-100 text-rose-800 hover:bg-rose-200 cursor-pointer'
+                                      } ${u.username === 'admin' ? 'cursor-not-allowed opacity-90' : ''}`}
+                                      title={u.username === 'admin' ? 'Cuenta principal protegida' : 'Haga clic para alternar estado'}
+                                    >
+                                      <span className={`w-1.5 h-1.5 rounded-full ${isActive ? 'bg-emerald-600' : 'bg-rose-600'}`}></span>
+                                      {isActive ? 'Activo' : 'Inactivo'}
+                                    </button>
+                                  </td>
+                                  <td className="py-3.5 px-4">
+                                    <div className="flex flex-wrap gap-1 max-w-xs">
+                                      {perms.consultar && (
+                                        <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded text-[9px] font-semibold">Consultar</span>
+                                      )}
+                                      {perms.registrar && (
+                                        <span className="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 rounded text-[9px] font-semibold">Registrar</span>
+                                      )}
+                                      {perms.modificar && (
+                                        <span className="px-1.5 py-0.5 bg-amber-50 text-amber-700 rounded text-[9px] font-semibold">Modificar</span>
+                                      )}
+                                      {perms.anular && (
+                                        <span className="px-1.5 py-0.5 bg-rose-50 text-rose-700 rounded text-[9px] font-semibold">Anular</span>
+                                      )}
+                                      {perms.importar && (
+                                        <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-[9px] font-semibold">Importar</span>
+                                      )}
+                                      {perms.reportes && (
+                                        <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-[9px] font-semibold">Reportes</span>
+                                      )}
+                                      {!perms.consultar && !perms.registrar && !perms.modificar && !perms.anular && !perms.importar && !perms.reportes && (
+                                        <span className="text-[10px] text-slate-400 italic">Sin permisos específicos</span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="py-3.5 px-4 text-right">
+                                    <div className="flex items-center justify-end gap-1.5">
+                                      <button
+                                        onClick={() => {
+                                          setUserForm({
+                                            id: u.id,
+                                            username: u.username,
+                                            password: '',
+                                            nombre_completo: u.nombre_completo || '',
+                                            role: u.role || 'user',
+                                            activo: u.activo === 1 || u.activo === true || u.activo === undefined,
+                                            permissions: u.permissions || { consultar: true, registrar: true, modificar: false, anular: false, importar: false, reportes: true }
+                                          });
+                                          setShowUserModal(true);
+                                        }}
+                                        className="p-1.5 bg-slate-100 hover:bg-blue-600 hover:text-white rounded-lg text-slate-600 transition-colors"
+                                        title="Editar Usuario y Permisos"
+                                      >
+                                        <Edit2 className="w-3.5 h-3.5" />
+                                      </button>
+                                      {u.username !== 'admin' && (
+                                        <button
+                                          onClick={async () => {
+                                            if (confirm(`¿Confirma que desea eliminar permanentemente al usuario "${u.username}"?`)) {
+                                              const res = await fetch(`/api/users/${u.id}?username=${currentUser.username}`, { method: 'DELETE' });
+                                              if (res.ok) {
+                                                showToast(`Usuario ${u.username} eliminado correctamente`);
+                                                loadData();
+                                              } else {
+                                                const err = await res.json();
+                                                showToast(err.error || 'Error al eliminar', 'error');
+                                              }
+                                            }
+                                          }}
+                                          className="p-1.5 bg-rose-50 hover:bg-rose-600 hover:text-white text-rose-600 rounded-lg transition-colors"
+                                          title="Eliminar Usuario"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Barra de Paginación de Usuarios */}
+                    <div className="p-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/50">
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <span>Mostrar:</span>
+                        <select
+                          value={usersPageSize}
+                          onChange={e => { setUsersPageSize(Number(e.target.value)); setUsersPage(1); }}
+                          className="px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs"
+                        >
+                          <option value={10}>10</option>
+                          <option value={25}>25</option>
+                          <option value={50}>50</option>
+                        </select>
+                        <span>de {filteredUsers.length} usuarios</span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          disabled={usersPage <= 1}
+                          onClick={() => setUsersPage(p => Math.max(1, p - 1))}
+                          className="p-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold disabled:opacity-40 hover:bg-slate-100"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <span className="text-xs font-bold text-slate-700 px-2">
+                          Página {usersPage} de {totalUserPages}
+                        </span>
+                        <button
+                          disabled={usersPage >= totalUserPages}
+                          onClick={() => setUsersPage(p => Math.min(totalUserPages, p + 1))}
+                          className="p-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold disabled:opacity-40 hover:bg-slate-100"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ========================================================= */}
+              {/* SUB-PESTAÑA 2: REGISTRO DE AUDITORÍA Y TRAZABILIDAD        */}
+              {/* ========================================================= */}
+              {userSubTab === 'audit' && (
+                <div className="space-y-6">
+                  {/* Tarjetas de Métricas de Auditoría */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Eventos</p>
+                        <p className="text-2xl font-bold text-slate-900 mt-0.5">{auditLogs.length}</p>
+                      </div>
+                      <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+                        <Shield className="w-5 h-5" />
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Eventos Hoy</p>
+                        <p className="text-2xl font-bold text-blue-600 mt-0.5">{todayLogsCount}</p>
+                      </div>
+                      <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                        <Calendar className="w-5 h-5" />
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Inicios de Sesión</p>
+                        <p className="text-2xl font-bold text-indigo-600 mt-0.5">{loginLogsCount}</p>
+                      </div>
+                      <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+                        <Lock className="w-5 h-5" />
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between">
+                      <div>
+                        <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Almacén & FUAS</p>
+                        <p className="text-2xl font-bold text-emerald-600 mt-0.5">{warehouseLogsCount}</p>
+                      </div>
+                      <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                        <Package className="w-5 h-5" />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Filtros Avanzados de Auditoría */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                    <div className="flex flex-col lg:flex-row gap-3">
+                      <div className="relative flex-1">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                        <input
+                          type="text"
+                          value={auditSearchQuery}
+                          onChange={e => { setAuditSearchQuery(e.target.value); setAuditPage(1); }}
+                          placeholder="Buscar por detalle de acción, usuario, IP o tipo de evento..."
+                          className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-purple-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <select
+                          value={auditActionFilter}
+                          onChange={e => { setAuditActionFilter(e.target.value); setAuditPage(1); }}
+                          className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:ring-2 focus:ring-purple-500"
+                        >
+                          <option value="todos">Todas las Acciones</option>
+                          {distinctAuditActions.map((act: string) => (
+                            <option key={act} value={act}>{act}</option>
+                          ))}
+                        </select>
+
+                        <select
+                          value={auditUserFilter}
+                          onChange={e => { setAuditUserFilter(e.target.value); setAuditPage(1); }}
+                          className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 focus:ring-2 focus:ring-purple-500"
+                        >
+                          <option value="todos">Todos los Usuarios</option>
+                          {distinctAuditUsers.map((usr: string) => (
+                            <option key={usr} value={usr}>{usr}</option>
+                          ))}
+                        </select>
+
+                        <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs">
+                          <span className="text-slate-400 font-medium">Desde:</span>
+                          <input
+                            type="date"
+                            value={auditStartDate}
+                            onChange={e => { setAuditStartDate(e.target.value); setAuditPage(1); }}
+                            className="bg-transparent text-slate-700 font-semibold focus:outline-none"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs">
+                          <span className="text-slate-400 font-medium">Hasta:</span>
+                          <input
+                            type="date"
+                            value={auditEndDate}
+                            onChange={e => { setAuditEndDate(e.target.value); setAuditPage(1); }}
+                            className="bg-transparent text-slate-700 font-semibold focus:outline-none"
+                          />
+                        </div>
+
+                        {(auditSearchQuery || auditActionFilter !== 'todos' || auditUserFilter !== 'todos' || auditStartDate || auditEndDate) && (
+                          <button
+                            onClick={() => {
+                              setAuditSearchQuery('');
+                              setAuditActionFilter('todos');
+                              setAuditUserFilter('todos');
+                              setAuditStartDate('');
+                              setAuditEndDate('');
+                              setAuditPage(1);
+                            }}
+                            className="px-3 py-2 text-xs text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl font-semibold transition-colors"
+                          >
+                            Limpiar Filtros
+                          </button>
                         )}
                       </div>
-                    )}
+                    </div>
                   </div>
-                </form>
-              </div>
+
+                  {/* Tabla de Registros de Auditoría */}
+                  <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="bg-slate-50/80 border-b border-slate-200 text-slate-600 uppercase font-bold text-[11px] tracking-wider">
+                            <th className="py-3.5 px-4"># Evento</th>
+                            <th className="py-3.5 px-4">Fecha y Hora</th>
+                            <th className="py-3.5 px-4">Usuario</th>
+                            <th className="py-3.5 px-4">Acción</th>
+                            <th className="py-3.5 px-4">Detalle de la Operación</th>
+                            <th className="py-3.5 px-4">Dirección IP</th>
+                            <th className="py-3.5 px-4 text-right">Detalle</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {paginatedAuditLogs.length === 0 ? (
+                            <tr>
+                              <td colSpan={7} className="py-12 text-center text-slate-400">
+                                <Shield className="w-8 h-8 mx-auto mb-2 opacity-40 text-purple-600" />
+                                No se encontraron registros de auditoría que coincidan con los filtros seleccionados.
+                              </td>
+                            </tr>
+                          ) : (
+                            paginatedAuditLogs.map((log: any) => {
+                              const act = log.action || '';
+                              let badgeColor = 'bg-slate-100 text-slate-800 border-slate-200';
+                              if (act.includes('LOGIN')) {
+                                badgeColor = 'bg-blue-100 text-blue-800 border-blue-200';
+                              } else if (act.includes('CREATE') || act.includes('RECEPTION')) {
+                                badgeColor = 'bg-emerald-100 text-emerald-800 border-emerald-200';
+                              } else if (act.includes('DELIVERY') || act.includes('PACKAGE')) {
+                                badgeColor = 'bg-purple-100 text-purple-800 border-purple-200';
+                              } else if (act.includes('UPDATE') || act.includes('TOGGLE')) {
+                                badgeColor = 'bg-amber-100 text-amber-800 border-amber-200';
+                              } else if (act.includes('DELETE') || act.includes('CANCEL') || act.includes('ANULAR')) {
+                                badgeColor = 'bg-rose-100 text-rose-800 border-rose-200';
+                              }
+
+                              return (
+                                <tr key={log.id} className="hover:bg-slate-50/70 transition-colors">
+                                  <td className="py-3 px-4 font-mono font-bold text-slate-400">
+                                    #{log.id}
+                                  </td>
+                                  <td className="py-3 px-4 whitespace-nowrap">
+                                    <div className="flex items-center gap-1.5 text-slate-600">
+                                      <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                                      <span className="font-mono text-[11px]">{log.created_at?.substring(0, 19)}</span>
+                                    </div>
+                                  </td>
+                                  <td className="py-3 px-4">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-6 h-6 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-[10px] font-bold">
+                                        {log.username ? log.username.substring(0, 2).toUpperCase() : 'US'}
+                                      </div>
+                                      <span className="font-bold text-slate-900">{log.username}</span>
+                                    </div>
+                                  </td>
+                                  <td className="py-3 px-4">
+                                    <span className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold border ${badgeColor}`}>
+                                      {log.action}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 px-4 max-w-md">
+                                    <span className="text-slate-700 line-clamp-2 leading-relaxed">
+                                      {log.details}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 px-4 whitespace-nowrap">
+                                    <span className="font-mono text-[11px] px-2 py-0.5 bg-slate-100 text-slate-600 rounded">
+                                      {log.ip_address || '127.0.0.1'}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 px-4 text-right">
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedAuditLog(log)}
+                                      className="p-1.5 bg-slate-100 hover:bg-purple-600 hover:text-white rounded-lg text-slate-600 transition-colors"
+                                      title="Ver detalle completo del evento"
+                                    >
+                                      <Eye className="w-3.5 h-3.5" />
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    {/* Barra de Paginación de Auditoría */}
+                    <div className="p-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/50">
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <span>Mostrar:</span>
+                        <select
+                          value={auditPageSize}
+                          onChange={e => { setAuditPageSize(Number(e.target.value)); setAuditPage(1); }}
+                          className="px-2 py-1 bg-white border border-slate-300 rounded-lg text-xs"
+                        >
+                          <option value={10}>10</option>
+                          <option value={25}>25</option>
+                          <option value={50}>50</option>
+                          <option value={100}>100</option>
+                        </select>
+                        <span>de {filteredAuditLogs.length} eventos filtrados</span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          disabled={auditPage <= 1}
+                          onClick={() => setAuditPage(p => Math.max(1, p - 1))}
+                          className="p-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold disabled:opacity-40 hover:bg-slate-100"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <span className="text-xs font-bold text-slate-700 px-2">
+                          Página {auditPage} de {totalAuditPages}
+                        </span>
+                        <button
+                          disabled={auditPage >= totalAuditPages}
+                          onClick={() => setAuditPage(p => Math.min(totalAuditPages, p + 1))}
+                          className="p-1.5 bg-white border border-slate-300 rounded-lg text-xs font-semibold disabled:opacity-40 hover:bg-slate-100"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ========================================================= */}
+              {/* SUB-PESTAÑA 3: CONFIGURACIÓN API PERÚ / RENIEC             */}
+              {/* ========================================================= */}
+              {userSubTab === 'apiperu' && (
+                <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 space-y-6">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-100 pb-4">
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                        <Key className="w-5 h-5 text-amber-500" /> Integración con API Perú (Consultas DNI / RENIEC)
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Permite consultar en tiempo real los nombres y apellidos de personas autorizadas ingresando únicamente su DNI de 8 dígitos.
+                      </p>
+                    </div>
+                    <span className="px-3 py-1 bg-amber-100 text-amber-900 font-bold font-mono text-[11px] rounded-lg flex items-center gap-1.5 shrink-0">
+                      <Lock className="w-3.5 h-3.5 text-amber-700" /> Exclusivo Administrador
+                    </span>
+                  </div>
+
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    setIsSavingToken(true);
+                    try {
+                      const res = await fetch('/api/settings/apiperu', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ token: apiPeruTokenInput, username: currentUser.username })
+                      });
+                      const data = await res.json();
+                      if (res.ok) {
+                        showToast('✅ Token de API Perú actualizado correctamente');
+                        loadData();
+                      } else {
+                        showToast(data.error || 'Error al guardar el Token', 'error');
+                      }
+                    } catch (err: any) {
+                      showToast('Error de conexión', 'error');
+                    } finally {
+                      setIsSavingToken(false);
+                    }
+                  }} className="space-y-4">
+                    
+                    <div>
+                      <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
+                        Token Bearer de API Perú (apiperu.dev)
+                      </label>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          type="text"
+                          required
+                          value={apiPeruTokenInput}
+                          onChange={e => setApiPeruTokenInput(e.target.value)}
+                          className="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 font-mono focus:ring-2 focus:ring-amber-500"
+                          placeholder="Ingrese su Token Bearer de API Perú (ej. f022c3c042cba713a65e69d8ab9299c...)"
+                        />
+                        <button
+                          type="submit"
+                          disabled={isSavingToken}
+                          className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-semibold rounded-xl text-xs shadow flex items-center justify-center gap-2 transition-colors shrink-0"
+                        >
+                          {isSavingToken ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                          Guardar Token
+                        </button>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1.5">
+                        Este token es encriptado y utilizado de forma segura por el servidor para verificar personal en recepciones y entregas.
+                      </p>
+                    </div>
+
+                    {/* Probar Token */}
+                    <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3">
+                      <h4 className="text-xs font-bold text-slate-800 flex items-center gap-2">
+                        <Search className="w-4 h-4 text-blue-600" /> Probar Consulta de DNI con API Perú
+                      </h4>
+                      <p className="text-[11px] text-slate-500">
+                        Verifique que su token cuente con saldo y conexión activa realizando una prueba con cualquier número de DNI válido:
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        <input
+                          type="text"
+                          maxLength={8}
+                          value={apiPeruTestDNI}
+                          onChange={e => setApiPeruTestDNI(e.target.value)}
+                          className="w-40 bg-white border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-900 font-mono focus:ring-2 focus:ring-blue-500"
+                          placeholder="DNI de 8 dígitos"
+                        />
+                        <button
+                          type="button"
+                          disabled={isTestingToken || apiPeruTestDNI.length !== 8}
+                          onClick={async () => {
+                            setIsTestingToken(true);
+                            setApiPeruTestResult(null);
+                            try {
+                              const res = await fetch(`/api/external/dni/${apiPeruTestDNI}`);
+                              const data = await res.json();
+                              setApiPeruTestResult({ status: res.status, ...data });
+                            } catch (err: any) {
+                              setApiPeruTestResult({ error: 'Error de red o conexión' });
+                            } finally {
+                              setIsTestingToken(false);
+                            }
+                          }}
+                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-xl text-xs flex items-center gap-1.5 shadow-sm transition-colors"
+                        >
+                          {isTestingToken ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                          Consultar DNI en Vivo
+                        </button>
+                      </div>
+
+                      {apiPeruTestResult && (
+                        <div className={`p-4 rounded-xl border text-xs font-mono mt-3 ${
+                          apiPeruTestResult.success ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-red-50 border-red-300 text-red-950'
+                        }`}>
+                          {apiPeruTestResult.success ? (
+                            <div className="space-y-1">
+                              <p className="font-bold text-emerald-900 flex items-center gap-1.5">
+                                <CheckCircle2 className="w-4 h-4 text-emerald-600" /> Respuesta exitosa de API Perú / RENIEC:
+                              </p>
+                              <p className="mt-1">DNI Consultado: <span className="font-bold">{apiPeruTestDNI}</span></p>
+                              <p>Nombres: <span className="font-bold">{apiPeruTestResult.nombres}</span></p>
+                              <p>Apellidos: <span className="font-bold">{apiPeruTestResult.apellidos}</span></p>
+                              <p className="text-[10px] text-emerald-700 font-sans mt-2">
+                                ✅ La conexión está funcionando perfectamente y lista para usarse en recepciones y entregas.
+                              </p>
+                            </div>
+                          ) : (
+                            <div className="space-y-1">
+                              <p className="font-bold text-red-950 flex items-center gap-1.5">
+                                <AlertTriangle className="w-4 h-4 text-rose-600" /> Error al consultar API Perú:
+                              </p>
+                              <p className="mt-0.5 text-[11px]">{apiPeruTestResult.error || 'No se pudo obtener datos con este Token o el DNI no existe.'}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </form>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          );
+        })()}
 
       </main>
 
@@ -5406,8 +6240,25 @@ export default function App() {
       {/* User Modal */}
       {showUserModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6">
-            <h3 className="text-lg font-bold text-slate-900 mb-4">{userForm.id ? 'Editar Usuario' : 'Nuevo Usuario'}</h3>
+          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full p-6 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+                  <User className="w-5 h-5" />
+                </div>
+                <h3 className="text-base font-bold text-slate-900">
+                  {userForm.id ? `Editar Usuario: ${userForm.username}` : 'Nuevo Usuario del Sistema'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowUserModal(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
             <form onSubmit={async (e) => {
               e.preventDefault();
               const res = await fetch('/api/users', {
@@ -5416,7 +6267,7 @@ export default function App() {
                 body: JSON.stringify({ ...userForm, admin_username: currentUser.username })
               });
               if (res.ok) {
-                showToast('Usuario guardado exitosamente');
+                showToast(`✅ Usuario ${userForm.username} guardado exitosamente`);
                 setShowUserModal(false);
                 loadData();
               } else {
@@ -5424,55 +6275,223 @@ export default function App() {
                 showToast(err.error || 'Error al guardar usuario', 'error');
               }
             }} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">Usuario</label>
-                <input
-                  type="text"
-                  required
-                  value={userForm.username}
-                  onChange={e => setUserForm({ ...userForm, username: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-800 font-mono"
-                />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Nombre de Usuario (Login)</label>
+                  <input
+                    type="text"
+                    required
+                    value={userForm.username}
+                    onChange={e => setUserForm({ ...userForm, username: e.target.value.toLowerCase().trim() })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-800 font-mono"
+                    placeholder="ej: operador1"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">
+                    Contraseña {userForm.id ? '(Opcional)' : '(Obligatoria)'}
+                  </label>
+                  <input
+                    type="password"
+                    required={!userForm.id}
+                    value={userForm.password || ''}
+                    onChange={e => setUserForm({ ...userForm, password: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-800"
+                    placeholder={userForm.id ? 'Dejar en blanco para conservar' : 'Mínimo 6 caracteres'}
+                  />
+                </div>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">Contraseña {userForm.id && '(Dejar en blanco para mantener)'}</label>
-                <input
-                  type="password"
-                  value={userForm.password}
-                  onChange={e => setUserForm({ ...userForm, password: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-800"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">Nombre Completo</label>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Nombre Completo y Cargo</label>
                 <input
                   type="text"
                   required
                   value={userForm.nombre_completo}
                   onChange={e => setUserForm({ ...userForm, nombre_completo: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-800"
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-800"
+                  placeholder="Lic. María Pérez - Almacén Central"
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">Rol</label>
-                <select
-                  value={userForm.role}
-                  onChange={e => setUserForm({ ...userForm, role: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-800"
-                >
-                  <option value="user">Operador (Usuario)</option>
-                  <option value="admin">Administrador</option>
-                </select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Rol en el Sistema</label>
+                  <select
+                    value={userForm.role}
+                    onChange={e => {
+                      const newRole = e.target.value;
+                      if (newRole === 'admin') {
+                        setUserForm({
+                          ...userForm,
+                          role: newRole,
+                          permissions: { consultar: true, registrar: true, modificar: true, anular: true, importar: true, reportes: true }
+                        });
+                      } else {
+                        setUserForm({ ...userForm, role: newRole });
+                      }
+                    }}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-800 font-semibold"
+                  >
+                    <option value="user">Operador (Usuario Estándar)</option>
+                    <option value="admin">Administrador del Sistema</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Estado de la Cuenta</label>
+                  <select
+                    value={userForm.activo !== undefined ? (userForm.activo ? 1 : 0) : 1}
+                    onChange={e => setUserForm({ ...userForm, activo: parseInt(e.target.value) === 1 })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3.5 py-2 text-xs text-slate-800 font-semibold"
+                  >
+                    <option value={1}>✅ Activo (Puede ingresar)</option>
+                    <option value={0}>⛔ Inactivo (Acceso bloqueado)</option>
+                  </select>
+                </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-4">
-                <button type="button" onClick={() => setShowUserModal(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold">Cancelar</button>
-                <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow">Guardar</button>
+              {/* Matriz de Permisos Granulares */}
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200 space-y-3">
+                <div className="flex justify-between items-center">
+                  <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <Shield className="w-4 h-4 text-purple-600" /> Permisos Granulares de Operación
+                  </label>
+                  <div className="flex gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setUserForm({
+                        ...userForm,
+                        permissions: { consultar: true, registrar: true, modificar: true, anular: true, importar: true, reportes: true }
+                      })}
+                      className="px-2 py-0.5 text-[10px] font-bold text-blue-600 hover:bg-blue-50 rounded"
+                    >
+                      Todos
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setUserForm({
+                        ...userForm,
+                        permissions: { consultar: true, registrar: false, modificar: false, anular: false, importar: false, reportes: true }
+                      })}
+                      className="px-2 py-0.5 text-[10px] font-bold text-slate-600 hover:bg-slate-200 rounded"
+                    >
+                      Solo Lectura
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  {[
+                    { key: 'consultar', label: 'Consultar módulos y stock' },
+                    { key: 'registrar', label: 'Registrar recepciones y entregas' },
+                    { key: 'modificar', label: 'Modificar registros y lotes' },
+                    { key: 'anular', label: 'Anular comprobantes y salidas' },
+                    { key: 'importar', label: 'Importación masiva por Excel' },
+                    { key: 'reportes', label: 'Descargar reportes y PDF' }
+                  ].map((perm) => (
+                    <label key={perm.key} className="flex items-center gap-2 p-2 bg-white rounded-xl border border-slate-200 cursor-pointer hover:bg-purple-50/50 transition-colors">
+                      <input
+                        type="checkbox"
+                        checked={!!(userForm.permissions && userForm.permissions[perm.key])}
+                        onChange={e => setUserForm({
+                          ...userForm,
+                          permissions: {
+                            ...(userForm.permissions || {}),
+                            [perm.key]: e.target.checked
+                          }
+                        })}
+                        className="rounded text-blue-600 focus:ring-blue-500 h-4 w-4"
+                      />
+                      <span className="text-[11px] font-medium text-slate-700">{perm.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setShowUserModal(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-600/20"
+                >
+                  {userForm.id ? 'Guardar Cambios' : 'Crear Usuario'}
+                </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Audit Log Detail Modal */}
+      {selectedAuditLog && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-lg w-full p-6 animate-in fade-in duration-200">
+            <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-purple-50 text-purple-600 rounded-xl">
+                  <Shield className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">
+                    Evento de Auditoría #{selectedAuditLog.id}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">Trazabilidad de seguridad DIRESA Piura</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedAuditLog(null)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Fecha y Hora</span>
+                  <span className="font-mono font-semibold text-slate-800">{selectedAuditLog.created_at}</span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Usuario Operador</span>
+                  <span className="font-bold text-purple-700">{selectedAuditLog.username}</span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Acción</span>
+                  <span className="font-mono font-bold text-slate-900">{selectedAuditLog.action}</span>
+                </div>
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">Dirección IP</span>
+                  <span className="font-mono text-slate-700">{selectedAuditLog.ip_address || '127.0.0.1'}</span>
+                </div>
+              </div>
+
+              <div>
+                <span className="text-xs font-bold text-slate-700 block mb-1.5">Detalles de la Operación Registrada</span>
+                <div className="p-3.5 bg-slate-900 text-slate-100 rounded-2xl font-mono text-xs leading-relaxed max-h-48 overflow-y-auto border border-slate-800">
+                  {selectedAuditLog.details}
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setSelectedAuditLog(null)}
+                  className="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-colors"
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
