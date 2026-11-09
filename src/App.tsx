@@ -373,6 +373,26 @@ export default function App() {
   const [personnel, setPersonnel] = useState<any[]>([]);
   const [usersList, setUsersList] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [warehousePackages, setWarehousePackages] = useState<any[]>([]);
+  const [showPackageModal, setShowPackageModal] = useState(false);
+  const [selectedPackage, setSelectedPackage] = useState<any>(null);
+  const [packageModalMode, setPackageModalMode] = useState<'create' | 'view'>('create');
+  const [packageForm, setPackageForm] = useState<any>({
+    product_id: '',
+    establishment_id: '',
+    cantidad_inicial: 3000,
+    batch_id: '',
+    range_start: '00001',
+    range_end: '03000',
+    numero_paquete: '01/01',
+    ubicacion_almacen: 'Almacén Central - Sector A',
+    foto_etiqueta: '',
+    ocr_raw_text: ''
+  });
+  const [isScanningOCR, setIsScanningOCR] = useState(false);
+  const [pkgSearch, setPkgSearch] = useState('');
+  const [pkgFilterEst, setPkgFilterEst] = useState('todos');
+  const [pkgFilterStatus, setPkgFilterStatus] = useState('todos');
 
   // Modals & UI states
   const [searchTerm, setSearchTerm] = useState('');
@@ -403,6 +423,7 @@ export default function App() {
   // Personnel Modal
   const [showPersModal, setShowPersModal] = useState(false);
   const [persForm, setPersForm] = useState<any>({ id: null, dni: '', nombres: '', apellidos: '' });
+  const [isSearchingDNI, setIsSearchingDNI] = useState(false);
 
   // Delivery / Cart state
   const [cartEstablishment, setCartEstablishment] = useState('');
@@ -453,7 +474,7 @@ export default function App() {
   // Load all data
   const loadData = async () => {
     try {
-      const [estRes, batRes, supRes, prodRes, progRes, recRes, stockRes, movRes, delRes, persRes, usersRes, auditRes, statsRes] = await Promise.all([
+      const [estRes, batRes, supRes, prodRes, progRes, recRes, stockRes, movRes, delRes, persRes, usersRes, auditRes, statsRes, pkgRes] = await Promise.all([
         fetch('/api/establishments').then(r => r.json()),
         fetch('/api/batches').then(r => r.json()),
         fetch('/api/suppliers').then(r => r.json()),
@@ -466,7 +487,8 @@ export default function App() {
         fetch('/api/personnel').then(r => r.json()),
         fetch('/api/users').then(r => r.json()),
         fetch('/api/audit-logs').then(r => r.json()),
-        fetch('/api/dashboard/stats').then(r => r.json())
+        fetch('/api/dashboard/stats').then(r => r.json()),
+        fetch('/api/warehouse/packages').then(r => r.json())
       ]);
 
       setEstablishments(estRes);
@@ -482,6 +504,7 @@ export default function App() {
       setUsersList(usersRes);
       setAuditLogs(auditRes);
       setStats(statsRes);
+      setWarehousePackages(pkgRes);
     } catch (err) {
       console.error('Error loading data:', err);
     }
@@ -895,6 +918,7 @@ export default function App() {
             { id: 'catalog', label: 'Catálogo & Proveedores', icon: Package },
             { id: 'programming', label: 'Programación FUA', icon: FileText },
             { id: 'reception', label: 'Recepción Almacén', icon: Truck },
+            { id: 'packages', label: 'Paquetes y QR', icon: QrCode },
             { id: 'inventory', label: 'Inventario & Stock', icon: BarChart3 },
             { id: 'cart', label: 'Carrito de Entregas', icon: ShoppingCart },
             { id: 'personnel', label: 'Personal Receptor', icon: Users },
@@ -993,7 +1017,12 @@ export default function App() {
 
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
                 <h3 className="text-base font-bold text-slate-900 mb-4">Accesos Rápidos del Sistema</h3>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <button onClick={() => setActiveTab('packages')} className="p-4 bg-purple-50 hover:bg-purple-100 rounded-xl border border-purple-200 text-left transition-colors col-span-2 shadow-sm">
+                    <QrCode className="w-6 h-6 text-purple-600 mb-2" />
+                    <p className="font-bold text-sm text-purple-950">📦 Módulo de Paquetes, OCR de Etiquetas y QR</p>
+                    <p className="text-xs text-purple-800 mt-1">Escanear etiquetas de proveedores, generar códigos QR únicos e identificar paquetes por RENAES</p>
+                  </button>
                   <button onClick={() => setActiveTab('programming')} className="p-4 bg-blue-50 hover:bg-blue-100 rounded-xl border border-blue-200 text-left transition-colors">
                     <FileText className="w-6 h-6 text-blue-600 mb-2" />
                     <p className="font-bold text-sm text-slate-900">Programación FUA</p>
@@ -1002,7 +1031,7 @@ export default function App() {
                   <button onClick={() => setActiveTab('reception')} className="p-4 bg-emerald-50 hover:bg-emerald-100 rounded-xl border border-emerald-200 text-left transition-colors">
                     <Truck className="w-6 h-6 text-emerald-600 mb-2" />
                     <p className="font-bold text-sm text-slate-900">Recepción Física</p>
-                    <p className="text-xs text-slate-600 mt-1">FUAs y otros formatos (HIS, Historias, etc.)</p>
+                    <p className="text-xs text-slate-600 mt-1">FUAs y otros formatos (HIS, etc.)</p>
                   </button>
                   <button onClick={() => setActiveTab('cart')} className="p-4 bg-indigo-50 hover:bg-indigo-100 rounded-xl border border-indigo-200 text-left transition-colors">
                     <ShoppingCart className="w-6 h-6 text-indigo-600 mb-2" />
@@ -1793,12 +1822,20 @@ export default function App() {
                 <h2 className="text-xl font-bold text-slate-900">Recepción en Almacén (FUAs y Otros Formatos)</h2>
                 <p className="text-xs text-slate-500 mt-1">Ingresos para FUAs por rangos y control por cantidad/blocks para Historias Clínicas, HIS, Recetarios, etc.</p>
               </div>
-              <button
-                onClick={() => setShowRecModal(true)}
-                className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-xs shadow-md shadow-emerald-600/20"
-              >
-                <Plus className="w-4 h-4" /> Registrar Recepción
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowQrModal(true)}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-xl text-xs shadow-md shadow-purple-600/20"
+                >
+                  <QrCode className="w-4 h-4" /> Verificar QR / Etiqueta
+                </button>
+                <button
+                  onClick={() => setShowRecModal(true)}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-xl text-xs shadow-md shadow-emerald-600/20"
+                >
+                  <Plus className="w-4 h-4" /> Registrar Recepción
+                </button>
+              </div>
             </div>
 
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
@@ -2803,6 +2840,193 @@ export default function App() {
           );
         })()}
 
+        {/* --- 10.B PAQUETES Y QR (OCR & GESTIÓN DE PAQUETES) --- */}
+        {activeTab === 'packages' && (() => {
+          const filteredPackages = warehousePackages.filter((pkg: any) => {
+            if (pkgFilterEst !== 'todos' && String(pkg.establishment_id) !== String(pkgFilterEst)) return false;
+            if (pkgFilterStatus !== 'todos' && pkg.estado !== pkgFilterStatus) return false;
+            if (pkgSearch.trim()) {
+              const q = pkgSearch.toLowerCase().trim();
+              const code = (pkg.codigo_paquete || '').toLowerCase();
+              const est = (pkg.establishment_nombre || '').toLowerCase();
+              const renaes = (pkg.renaes || '').toLowerCase();
+              const prod = (pkg.product_nombre || '').toLowerCase();
+              const lote = (pkg.batch_codigo || '').toLowerCase();
+              if (!code.includes(q) && !est.includes(q) && !renaes.includes(q) && !prod.includes(q) && !lote.includes(q)) {
+                return false;
+              }
+            }
+            return true;
+          });
+
+          return (
+            <div className="space-y-6">
+              {/* Header */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                    <QrCode className="w-6 h-6 text-purple-600" /> Gestión de Paquetes, OCR de Etiquetas & Códigos QR
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">Escanee etiquetas de proveedores con OCR, genere identificadores únicos con QR y controle saldos e historiales.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      setPackageForm({
+                        product_id: products[0]?.id ? String(products[0].id) : '',
+                        establishment_id: '',
+                        cantidad_inicial: 3000,
+                        batch_id: batches[0]?.id ? String(batches[0].id) : '',
+                        range_start: '00001',
+                        range_end: '03000',
+                        numero_paquete: '01/01',
+                        ubicacion_almacen: 'Almacén Central - Sector A',
+                        foto_etiqueta: '',
+                        ocr_raw_text: ''
+                      });
+                      setPackageModalMode('create');
+                      setShowPackageModal(true);
+                    }}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-xl text-xs shadow-md shadow-purple-600/20"
+                  >
+                    <Plus className="w-4 h-4" /> Registrar Nuevo Paquete / OCR
+                  </button>
+                </div>
+              </div>
+
+              {/* Filtros */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <Filter className="w-4 h-4 text-purple-600" /> Filtros de Paquetes en Almacén
+                  </h3>
+                  {(pkgSearch || pkgFilterEst !== 'todos' || pkgFilterStatus !== 'todos') && (
+                    <button
+                      onClick={() => {
+                        setPkgSearch('');
+                        setPkgFilterEst('todos');
+                        setPkgFilterStatus('todos');
+                      }}
+                      className="text-xs font-semibold text-purple-600 hover:underline flex items-center gap-1"
+                    >
+                      <X className="w-3.5 h-3.5" /> Limpiar Filtros
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Establecimiento (IPRESS)</label>
+                    <SearchableEstablishmentSelect
+                      establishments={establishments}
+                      value={pkgFilterEst}
+                      onChange={val => setPkgFilterEst(val || 'todos')}
+                      includeAllOption
+                      allLabel="-- Todas las IPRESS --"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Estado del Paquete</label>
+                    <select
+                      value={pkgFilterStatus}
+                      onChange={e => setPkgFilterStatus(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 font-medium"
+                    >
+                      <option value="todos">-- Todos los Estados --</option>
+                      <option value="en_almacen">En Almacén (Con Saldo)</option>
+                      <option value="entregado">Entregado (Agotado)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Búsqueda Rápida</label>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                      <input
+                        type="text"
+                        placeholder="Código de paquete, RENAES, Producto..."
+                        value={pkgSearch}
+                        onChange={e => setPkgSearch(e.target.value)}
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-600"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Lista de Paquetes en Tarjetas / Tabla */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-sm font-bold text-slate-900">Listado de Paquetes Identificados ({filteredPackages.length})</h3>
+                  <span className="text-xs font-mono font-semibold text-slate-500">
+                    Control de Saldo y QR Único
+                  </span>
+                </div>
+
+                {filteredPackages.length === 0 ? (
+                  <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-xl">
+                    <QrCode className="w-10 h-10 text-slate-400 mx-auto mb-2" />
+                    <p className="text-sm font-bold text-slate-700">No se encontraron paquetes registrados</p>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
+                      Utilice el botón "Registrar Nuevo Paquete / OCR" para fotografiar una etiqueta o registrar manualmente.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredPackages.map((pkg: any) => {
+                      const isComplete = pkg.saldo <= 0;
+                      return (
+                        <div key={pkg.id} className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col justify-between hover:border-purple-400 transition-all shadow-sm">
+                          <div>
+                            <div className="flex justify-between items-center mb-2">
+                              <span className="px-2 py-0.5 bg-purple-100 text-purple-800 font-mono font-bold text-[11px] rounded-lg">
+                                {pkg.codigo_paquete}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                isComplete ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
+                              }`}>
+                                {isComplete ? 'Entregado (0 Saldo)' : `Saldo: ${pkg.saldo.toLocaleString()} u.`}
+                              </span>
+                            </div>
+
+                            <p className="text-xs font-bold text-slate-900 mb-1">{pkg.product_nombre}</p>
+                            <p className="text-[11px] text-slate-600 mb-2 font-medium">
+                              IPRESS: <span className="font-bold text-slate-900">{pkg.establishment_nombre || 'Almacén Central'}</span> ({pkg.renaes || 'CENTRAL'})
+                            </p>
+
+                            <div className="bg-white p-2.5 rounded-xl border border-slate-200 text-[11px] font-mono text-slate-700 space-y-0.5 mb-3">
+                              <p>Lote: <span className="font-bold text-blue-600">Lote {pkg.batch_codigo || 'General'}</span> | Pqt: {pkg.numero_paquete || '01/01'}</p>
+                              {pkg.range_start && (
+                                <p className="text-emerald-700 font-bold">Rango: {pkg.range_start} - {pkg.range_end}</p>
+                              )}
+                              <p className="text-slate-500 text-[10px]">Ubicación: {pkg.ubicacion_almacen}</p>
+                            </div>
+                          </div>
+
+                          <div className="pt-3 border-t border-slate-200 flex items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                const res = await fetch(`/api/warehouse/packages/${pkg.id}`);
+                                const data = await res.json();
+                                setSelectedPackage(data);
+                                setPackageModalMode('view');
+                                setShowPackageModal(true);
+                              }}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg text-xs shadow transition-colors"
+                            >
+                              <QrCode className="w-3.5 h-3.5" /> Ficha & QR
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+
         {/* --- 11. USUARIOS & AUDITORÍA (ADMIN) --- */}
         {activeTab === 'users' && currentUser.role === 'admin' && (
           <div className="space-y-6">
@@ -3693,15 +3917,46 @@ export default function App() {
             }} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">DNI (8 dígitos)</label>
-                <input
-                  type="text"
-                  required
-                  maxLength={8}
-                  value={persForm.dni}
-                  onChange={e => setPersForm({ ...persForm, dni: e.target.value })}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-800 font-mono"
-                  placeholder="12345678"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    required
+                    maxLength={8}
+                    value={persForm.dni}
+                    onChange={e => setPersForm({ ...persForm, dni: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-800 font-mono"
+                    placeholder="12345678"
+                  />
+                  <button
+                    type="button"
+                    disabled={isSearchingDNI || persForm.dni.length !== 8}
+                    onClick={async () => {
+                      setIsSearchingDNI(true);
+                      try {
+                        const res = await fetch(`/api/external/dni/${persForm.dni}`);
+                        const data = await res.json();
+                        if (res.ok && data.success) {
+                          setPersForm({
+                            ...persForm,
+                            nombres: data.nombres || '',
+                            apellidos: data.apellidos || ''
+                          });
+                          showToast('✅ DNI consultado exitosamente en API Perú');
+                        } else {
+                          showToast(data.error || 'DNI no encontrado', 'error');
+                        }
+                      } catch (err: any) {
+                        showToast('Error al consultar DNI', 'error');
+                      } finally {
+                        setIsSearchingDNI(false);
+                      }
+                    }}
+                    className="px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-xl text-xs whitespace-nowrap shadow transition-colors flex items-center gap-1"
+                  >
+                    {isSearchingDNI ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                    Consultar API Perú
+                  </button>
+                </div>
               </div>
 
               <div>
