@@ -1658,8 +1658,8 @@ app.delete('/api/warehouse/packages/:id', (req, res) => {
     }
 
     // Check if package has delivered movements
-    const delCount = db.prepare('SELECT COUNT(*) as count FROM inventory_movements WHERE referencia LIKE ? AND tipo_movimiento = ?').get(`%${pkg.codigo_paquete}%`, 'salida') as { count: number };
-    if (delCount.count > 0) {
+    const delCount = db.prepare("SELECT COUNT(*) as count FROM inventory_movements WHERE referencia LIKE ? AND tipo IN ('salida', 'entrega')").get(`%${pkg.codigo_paquete}%`) as { count: number };
+    if (delCount && delCount.count > 0) {
       return res.status(400).json({ error: 'No se puede eliminar un paquete que tiene entregas registradas. Anule primero los comprobantes de salida.' });
     }
 
