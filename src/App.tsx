@@ -4,7 +4,7 @@ import {
   BarChart3, CheckCircle2, AlertTriangle, Plus, Search, Edit2, 
   Download, Upload, LogOut, Lock, User, FileSpreadsheet, Printer, 
   Eye, Check, X, RefreshCw, AlertCircle, ShoppingCart, Trash2,
-  Filter, Calendar, QrCode
+  Filter, Calendar, QrCode, Key
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -457,6 +457,13 @@ export default function App() {
   const [showUserModal, setShowUserModal] = useState(false);
   const [userForm, setUserForm] = useState({ id: null, username: '', password: '', nombre_completo: '', role: 'user', permissions: { consultar: true, registrar: true, modificar: false, anular: false, importar: false, reportes: true } });
 
+  // API Perú Settings state (Admin Only)
+  const [apiPeruTokenInput, setApiPeruTokenInput] = useState('');
+  const [apiPeruTestDNI, setApiPeruTestDNI] = useState('44444444');
+  const [isSavingToken, setIsSavingToken] = useState(false);
+  const [isTestingToken, setIsTestingToken] = useState(false);
+  const [apiPeruTestResult, setApiPeruTestResult] = useState<any>(null);
+
   // Comprobantes & Reportes filter states
   const [reportStartDate, setReportStartDate] = useState('');
   const [reportEndDate, setReportEndDate] = useState('');
@@ -474,7 +481,7 @@ export default function App() {
   // Load all data
   const loadData = async () => {
     try {
-      const [estRes, batRes, supRes, prodRes, progRes, recRes, stockRes, movRes, delRes, persRes, usersRes, auditRes, statsRes, pkgRes] = await Promise.all([
+      const [estRes, batRes, supRes, prodRes, progRes, recRes, stockRes, movRes, delRes, persRes, usersRes, auditRes, statsRes, pkgRes, apiPeruRes] = await Promise.all([
         fetch('/api/establishments').then(r => r.json()),
         fetch('/api/batches').then(r => r.json()),
         fetch('/api/suppliers').then(r => r.json()),
@@ -488,7 +495,8 @@ export default function App() {
         fetch('/api/users').then(r => r.json()),
         fetch('/api/audit-logs').then(r => r.json()),
         fetch('/api/dashboard/stats').then(r => r.json()),
-        fetch('/api/warehouse/packages').then(r => r.json())
+        fetch('/api/warehouse/packages').then(r => r.json()),
+        fetch('/api/settings/apiperu').then(r => r.json()).catch(() => ({ token: '' }))
       ]);
 
       setEstablishments(estRes);
@@ -505,6 +513,9 @@ export default function App() {
       setAuditLogs(auditRes);
       setStats(statsRes);
       setWarehousePackages(pkgRes);
+      if (apiPeruRes && apiPeruRes.token) {
+        setApiPeruTokenInput(apiPeruRes.token);
+      }
     } catch (err) {
       console.error('Error loading data:', err);
     }
@@ -3129,6 +3140,128 @@ export default function App() {
                   </table>
                 </div>
               </div>
+
+              {/* Configuración del Token de API Perú (Solo Administrador) */}
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 lg:col-span-2 space-y-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <Key className="w-5 h-5 text-amber-500" /> Configuración de Integración API Perú (Consultas DNI)
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      Solo visible para Administradores. Configure su Token Bearer otorgado por API Perú (apiperu.dev) para la búsqueda automática de personal por DNI.
+                    </p>
+                  </div>
+                  <span className="px-2.5 py-1 bg-amber-100 text-amber-900 font-bold font-mono text-[10px] rounded-lg flex items-center gap-1 shrink-0">
+                    <Lock className="w-3 h-3 text-amber-700" /> Exclusivo Administrador
+                  </span>
+                </div>
+
+                <form onSubmit={async (e) => {
+                  e.preventDefault();
+                  setIsSavingToken(true);
+                  try {
+                    const res = await fetch('/api/settings/apiperu', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ token: apiPeruTokenInput, username: currentUser.username })
+                    });
+                    const data = await res.json();
+                    if (res.ok) {
+                      showToast('✅ Token de API Perú actualizado correctamente');
+                      loadData();
+                    } else {
+                      showToast(data.error || 'Error al guardar el Token', 'error');
+                    }
+                  } catch (err: any) {
+                    showToast('Error de conexión', 'error');
+                  } finally {
+                    setIsSavingToken(false);
+                  }
+                }} className="space-y-4">
+                  
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 mb-1.5">
+                      Clave Token de API Perú (Bearer Token)
+                    </label>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <input
+                        type="text"
+                        required
+                        value={apiPeruTokenInput}
+                        onChange={e => setApiPeruTokenInput(e.target.value)}
+                        className="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-900 font-mono focus:ring-2 focus:ring-amber-500"
+                        placeholder="Ingrese su Token Bearer de API Perú (ej. f022c3c042cba713a65e69d8ab9299c...)"
+                      />
+                      <button
+                        type="submit"
+                        disabled={isSavingToken}
+                        className="px-5 py-2.5 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white font-semibold rounded-xl text-xs shadow flex items-center justify-center gap-2 transition-colors shrink-0"
+                      >
+                        {isSavingToken ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                        Guardar Token
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Probar Token */}
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                    <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <Search className="w-4 h-4 text-blue-600" /> Probar Funcionamiento del Token con un DNI
+                    </h4>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <input
+                        type="text"
+                        maxLength={8}
+                        value={apiPeruTestDNI}
+                        onChange={e => setApiPeruTestDNI(e.target.value)}
+                        className="w-36 bg-white border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900 font-mono"
+                        placeholder="8 dígitos"
+                      />
+                      <button
+                        type="button"
+                        disabled={isTestingToken || apiPeruTestDNI.length !== 8}
+                        onClick={async () => {
+                          setIsTestingToken(true);
+                          setApiPeruTestResult(null);
+                          try {
+                            const res = await fetch(`/api/external/dni/${apiPeruTestDNI}`);
+                            const data = await res.json();
+                            setApiPeruTestResult({ status: res.status, ...data });
+                          } catch (err: any) {
+                            setApiPeruTestResult({ error: 'Error de red o conexión' });
+                          } finally {
+                            setIsTestingToken(false);
+                          }
+                        }}
+                        className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold rounded-xl text-xs flex items-center gap-1.5 shadow-sm"
+                      >
+                        {isTestingToken ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+                        Probar Consulta DNI
+                      </button>
+                    </div>
+
+                    {apiPeruTestResult && (
+                      <div className={`p-3 rounded-xl border text-xs font-mono ${
+                        apiPeruTestResult.success ? 'bg-emerald-50 border-emerald-300 text-emerald-950' : 'bg-red-50 border-red-300 text-red-950'
+                      }`}>
+                        {apiPeruTestResult.success ? (
+                          <div>
+                            <p className="font-bold text-emerald-900">✅ Consulta Exitosa en API Perú:</p>
+                            <p className="mt-1">Nombres: <span className="font-bold">{apiPeruTestResult.nombres}</span></p>
+                            <p>Apellidos: <span className="font-bold">{apiPeruTestResult.apellidos}</span></p>
+                          </div>
+                        ) : (
+                          <div>
+                            <p className="font-bold text-red-950">❌ Error al consultar API Perú:</p>
+                            <p className="mt-0.5 text-[11px]">{apiPeruTestResult.error || 'No se pudo obtener datos con este Token'}</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </form>
+              </div>
             </div>
           </div>
         )}
@@ -4369,6 +4502,368 @@ export default function App() {
                 Cerrar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Package & OCR Modal */}
+      {showPackageModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <QrCode className="w-5 h-5 text-purple-600" />
+                  {packageModalMode === 'create' ? 'Registrar Nuevo Paquete & Escaneo OCR' : `Ficha del Paquete ${selectedPackage?.codigo_paquete || ''}`}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {packageModalMode === 'create' 
+                    ? 'Escanee la etiqueta del proveedor o complete la información de la IPRESS y correlativos.'
+                    : 'Consulte el saldo, ubicación, código QR e historial de movimientos del paquete.'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPackageModal(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {packageModalMode === 'create' ? (
+              <form onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  const res = await fetch('/api/warehouse/packages', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      ...packageForm,
+                      user_id: currentUser.id,
+                      username: currentUser.username
+                    })
+                  });
+                  const data = await res.json();
+                  if (res.ok) {
+                    showToast(`✅ Paquete ${data.codigo_paquete} registrado exitosamente en almacén`);
+                    setShowPackageModal(false);
+                    loadData();
+                  } else {
+                    showToast(data.error || 'Error al registrar paquete', 'error');
+                  }
+                } catch (err: any) {
+                  showToast('Error de conexión al guardar el paquete', 'error');
+                }
+              }} className="space-y-4">
+                
+                {/* OCR Escaneo Box */}
+                <div className="bg-purple-50 p-4 rounded-xl border border-purple-200 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs font-bold text-purple-900 flex items-center gap-1.5">
+                      <QrCode className="w-4 h-4 text-purple-600" /> Escanear o Fotografiar Etiqueta (OCR)
+                    </span>
+                    <button
+                      type="button"
+                      disabled={isScanningOCR}
+                      onClick={async () => {
+                        setIsScanningOCR(true);
+                        try {
+                          const res = await fetch('/api/warehouse/packages/ocr', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ image: 'demo_label_image_data' })
+                          });
+                          const data = await res.json();
+                          if (res.ok && data.extracted) {
+                            const ext = data.extracted;
+                            const matchedEst = establishments.find(e => e.renaes && String(e.renaes).padStart(8, '0') === String(ext.renaes).padStart(8, '0'));
+                            setPackageForm({
+                              ...packageForm,
+                              establishment_id: matchedEst ? String(matchedEst.id) : '',
+                              cantidad_inicial: ext.cantidad || 3000,
+                              range_start: ext.range_start || '00001',
+                              range_end: ext.range_end || '03000',
+                              numero_paquete: ext.numero_paquete || '01/01',
+                              ocr_raw_text: ext.ocr_raw_text || ''
+                            });
+                            showToast(`✅ OCR procesado: RENAES ${ext.renaes} (${ext.nombre_ipress}) reconocido.`);
+                          }
+                        } catch (err) {
+                          showToast('Error al procesar lectura de etiqueta OCR', 'error');
+                        } finally {
+                          setIsScanningOCR(false);
+                        }
+                      }}
+                      className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg text-xs shadow flex items-center gap-1.5"
+                    >
+                      {isScanningOCR ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
+                      Escanear Etiqueta Ejemplo
+                    </button>
+                  </div>
+                  {packageForm.ocr_raw_text && (
+                    <div className="bg-white p-2.5 rounded-lg border border-purple-200 text-[10px] font-mono text-purple-900 leading-relaxed">
+                      <p className="font-bold text-purple-950 mb-0.5">Texto Extraído por OCR:</p>
+                      <pre className="whitespace-pre-wrap">{packageForm.ocr_raw_text}</pre>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">
+                    Producto / Formato del Catálogo
+                  </label>
+                  <select
+                    required
+                    value={packageForm.product_id}
+                    onChange={e => setPackageForm({ ...packageForm, product_id: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 font-medium"
+                  >
+                    <option value="">-- Seleccione un Formato --</option>
+                    {products.map((p: any) => (
+                      <option key={p.id} value={p.id}>
+                        {p.nombre} ({p.codigo}) - {p.tipo === 'fua' ? 'Por Rangos FUA' : 'Bajo Demanda'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">
+                    Establecimiento de Salud (IPRESS)
+                  </label>
+                  <SearchableEstablishmentSelect
+                    establishments={establishments}
+                    value={packageForm.establishment_id}
+                    onChange={val => setPackageForm({ ...packageForm, establishment_id: val })}
+                    placeholder="Buscar IPRESS por RENAES (ej. 00001986) o Nombre..."
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Cantidad Inicial</label>
+                    <input
+                      type="number"
+                      required
+                      min="1"
+                      value={packageForm.cantidad_inicial}
+                      onChange={e => setPackageForm({ ...packageForm, cantidad_inicial: parseInt(e.target.value) || 0 })}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-bold text-slate-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Lote</label>
+                    <select
+                      value={packageForm.batch_id}
+                      onChange={e => setPackageForm({ ...packageForm, batch_id: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 font-medium"
+                    >
+                      <option value="">Sin lote específico</option>
+                      {batches.map((b: any) => (
+                        <option key={b.id} value={b.id}>Lote {b.codigo}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">N.º Paquete</label>
+                    <input
+                      type="text"
+                      placeholder="01/01"
+                      value={packageForm.numero_paquete}
+                      onChange={e => setPackageForm({ ...packageForm, numero_paquete: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800 font-mono"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Correlativo Inicio</label>
+                    <input
+                      type="text"
+                      placeholder="00001"
+                      value={packageForm.range_start}
+                      onChange={e => setPackageForm({ ...packageForm, range_start: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-800"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Correlativo Fin</label>
+                    <input
+                      type="text"
+                      placeholder="03000"
+                      value={packageForm.range_end}
+                      onChange={e => setPackageForm({ ...packageForm, range_end: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs font-mono text-slate-800"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1">Ubicación Física en Almacén</label>
+                  <input
+                    type="text"
+                    value={packageForm.ubicacion_almacen}
+                    onChange={e => setPackageForm({ ...packageForm, ubicacion_almacen: e.target.value })}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-xs text-slate-800"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowPackageModal(false)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-xl text-xs shadow"
+                  >
+                    Guardar Paquete & Generar QR
+                  </button>
+                </div>
+              </form>
+            ) : selectedPackage ? (
+              <div className="space-y-4">
+                {/* QR Display Card */}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col sm:flex-row items-center gap-4">
+                  <div className="bg-white p-3 rounded-xl border border-slate-300 shadow-sm flex flex-col items-center">
+                    <div className="w-32 h-32 bg-white flex items-center justify-center border-2 border-slate-900 rounded-lg p-1">
+                      <QrCode className="w-24 h-24 text-slate-900" />
+                    </div>
+                    <span className="text-[10px] font-mono font-bold text-purple-700 mt-2">
+                      {selectedPackage.codigo_paquete}
+                    </span>
+                  </div>
+
+                  <div className="flex-1 space-y-1.5 text-xs">
+                    <p className="font-extrabold text-sm text-slate-900">{selectedPackage.product_nombre}</p>
+                    <p className="text-slate-600 font-medium">
+                      IPRESS: <span className="font-bold text-slate-900">{selectedPackage.establishment_nombre || 'Almacén Central'}</span>
+                    </p>
+                    <p className="font-mono text-slate-700">RENAES: <span className="font-bold">{selectedPackage.renaes || '00000000'}</span></p>
+                    <div className="flex items-center gap-2 pt-1">
+                      <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-mono font-bold text-[11px]">
+                        Saldo: {selectedPackage.saldo?.toLocaleString() || 0} u.
+                      </span>
+                      {selectedPackage.range_start && (
+                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-mono text-[11px]">
+                          Rangos: {selectedPackage.range_start} - {selectedPackage.range_end}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-500 pt-1">Ubicación: {selectedPackage.ubicacion_almacen}</p>
+                  </div>
+                </div>
+
+                {/* Move / Deliver partial form inside package view */}
+                <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                    <Truck className="w-4 h-4 text-purple-600" /> Registrar Entrega / Salida de este Paquete
+                  </h4>
+                  <form onSubmit={async (e) => {
+                    e.preventDefault();
+                    const form = e.target as any;
+                    const qty = parseInt(form.deliveryQty.value) || 0;
+                    const dni = form.receptorDni.value;
+                    const name = form.receptorName.value;
+                    if (qty <= 0 || qty > selectedPackage.saldo) {
+                      showToast(`La cantidad debe ser mayor a 0 y no superar el saldo (${selectedPackage.saldo})`, 'error');
+                      return;
+                    }
+                    try {
+                      const res = await fetch(`/api/warehouse/packages/${selectedPackage.id}/movement`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          tipo: 'entrega',
+                          cantidad: qty,
+                          receptor_dni: dni,
+                          receptor_nombre: name,
+                          user_id: currentUser.id,
+                          username: currentUser.username
+                        })
+                      });
+                      if (res.ok) {
+                        showToast(`✅ Entrega de ${qty} u. realizada desde paquete ${selectedPackage.codigo_paquete}`);
+                        setShowPackageModal(false);
+                        loadData();
+                      } else {
+                        const err = await res.json();
+                        showToast(err.error || 'Error al procesar movimiento', 'error');
+                      }
+                    } catch (err) {
+                      showToast('Error de conexión', 'error');
+                    }
+                  }} className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Cant. Entregar</label>
+                        <input
+                          type="number"
+                          name="deliveryQty"
+                          required
+                          min="1"
+                          max={selectedPackage.saldo}
+                          defaultValue={selectedPackage.saldo}
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">DNI Receptor</label>
+                        <input
+                          type="text"
+                          name="receptorDni"
+                          required
+                          maxLength={8}
+                          placeholder="8 dígitos"
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-mono text-slate-900"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Nombre Receptor</label>
+                        <input
+                          type="text"
+                          name="receptorName"
+                          required
+                          placeholder="Nombres y Apellidos"
+                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => window.print()}
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs flex items-center gap-1"
+                      >
+                        <Printer className="w-3.5 h-3.5" /> Imprimir Etiqueta QR
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={selectedPackage.saldo <= 0}
+                        className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold rounded-xl text-xs shadow"
+                      >
+                        Confirmar Salida de Paquete
+                      </button>
+                    </div>
+                  </form>
+                </div>
+
+                <div className="flex justify-end pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowPackageModal(false)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       )}

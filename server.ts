@@ -212,7 +212,17 @@ db.exec(`
     FOREIGN KEY(batch_id) REFERENCES batches(id),
     FOREIGN KEY(user_id) REFERENCES users(id)
   );
+
+  CREATE TABLE IF NOT EXISTS system_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
 `);
+
+try {
+  db.prepare("INSERT OR IGNORE INTO system_settings (key, value) VALUES ('apiperu_token', 'f022c3c042cba713a65e69d8ab9299c06a6d0d862d349fdae6a26d5b8cc1e260')").run();
+} catch (e) {}
 
 // Auto-migration for missing columns in existing SQLite database file
 try {
@@ -1583,45 +1593,111 @@ app.get('/api/dashboard/stats', (req, res) => {
   }
 });
 
-// API Perú DNI Lookup
+// API Perú Settings Endpoints (Admin Only)
+app.get('/api/settings/apiperu', (req, res) => {
+  try {
+    const row = db.prepare("SELECT value, updated_at FROM system_settings WHERE key = 'apiperu_token'").get() as any;
+    res.json({ token: row ? row.value : '', updated_at: row ? row.updated_at : null });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/settings/apiperu', (req, res) => {
+  try {
+    const { token, username } = req.body;
+    const user = db.prepare('SELECT id, role FROM users WHERE username = ?').get(username) as any;
+    if (!user || user.role !== 'admin') {
+      return res.status(403).json({ error: 'Acceso restringido. Solo el Administrador puede configurar el Token de API Perú.' });
+    }
+    const cleanToken = (token || '').trim();
+    db.prepare("INSERT INTO system_settings (key, value, updated_at) VALUES ('apiperu_token', ?, CURRENT_TIMESTAMP) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP").run(cleanToken);
+    logAudit(user.id, username, 'UPDATE_APIPERU_TOKEN', 'Actualizó la clave Token de API Perú', req.ip || '127.0.0.1');
+    res.json({ success: true, message: 'Token de API Perú guardado correctamente.' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// API Perú DNI Lookup (Dynamic token with fallbacks)
 app.get('/api/external/dni/:dni', async (req, res) => {
   const { dni } = req.params;
   if (!dni || dni.length !== 8) {
     return res.status(400).json({ error: 'DNI inválido (debe tener 8 dígitos)' });
   }
-  const token = 'f022c3c042cba713a65e69d8ab9299c06a6d0d862d349fdae6a26d5b8cc1e260';
+
+  const tokenRow = db.prepare("SELECT value FROM system_settings WHERE key = 'apiperu_token'").get() as any;
+  const token = tokenRow ? tokenRow.value.trim() : 'f022c3c042cba713a65e69d8ab9299c06a6d0d862d349fdae6a26d5b8cc1e260';
+
+  if (!token) {
+    return res.status(400).json({ error: 'El Token de API Perú no está configurado. Ingrese a "Usuarios & Auditoría" -> "Configuración API Perú" con cuenta de Administrador para configurarlo.' });
+  }
+
   try {
-    const response = await fetch(`https://api.apiperu.dev/v1/dni/${dni}`, {
+    // Attempt 1: GET https://api.apiperu.dev/v1/dni/{dni}
+    let response = await fetch(`https://api.apiperu.dev/v1/dni/${dni}`, {
+      method: 'GET',
       headers: {
         'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
+        'Accept': 'application/json'
       }
     });
-    const data = await response.json();
+
+    let data: any = null;
+    try {
+      data = await response.json();
+    } catch (e) {
+      data = null;
+    }
+
+    // Attempt 2: POST https://apiperu.dev/api/dni if v1 failed or unauthenticated
+    if (!data || !data.success) {
+      try {
+        const postRes = await fetch('https://apiperu.dev/api/dni', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({ dni })
+        });
+        const postData = await postRes.json();
+        if (postData && (postData.success || postData.data)) {
+          data = postData;
+        }
+      } catch (e) {}
+    }
+
+    // Attempt 3: GET https://api.apiperu.dev/v2/dni/{dni}
+    if (!data || !data.success) {
+      try {
+        const v2Res = await fetch(`https://api.apiperu.dev/v2/dni/${dni}`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json'
+          }
+        });
+        const v2Data = await v2Res.json();
+        if (v2Data && (v2Data.success || v2Data.data)) {
+          data = v2Data;
+        }
+      } catch (e) {}
+    }
+
     if (data && (data.success || data.data)) {
       const d = data.data || data;
-      const nombres = d.nombres || '';
-      const apellidos = `${d.apellido_paterno || ''} ${d.apellido_materno || ''}`.trim() || d.nombre_completo || '';
+      const nombres = d.nombres || d.nombre || '';
+      const apellidos = `${d.apellido_paterno || d.apellidoPaterno || ''} ${d.apellido_materno || d.apellidoMaterno || ''}`.trim() || d.nombre_completo || d.nombreCompleto || '';
       return res.json({ success: true, nombres, apellidos, raw: d });
     } else {
-      const response2 = await fetch(`https://api.apiperu.dev/v2/dni/${dni}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      const data2 = await response2.json();
-      if (data2 && (data2.success || data2.data)) {
-        const d = data2.data || data2;
-        const nombres = d.nombres || '';
-        const apellidos = `${d.apellido_paterno || ''} ${d.apellido_materno || ''}`.trim() || d.nombre_completo || '';
-        return res.json({ success: true, nombres, apellidos, raw: d });
-      }
-      return res.status(404).json({ error: data.message || 'DNI no encontrado en API Perú' });
+      const errMsg = data?.message || data?.error || 'Token inválido, expirado o límite de consultas superado en API Perú. Actualice el Token en Configuración.';
+      return res.status(400).json({ error: errMsg });
     }
   } catch (err: any) {
     console.error('API Perú error:', err);
-    return res.status(500).json({ error: 'Error al consultar API Perú: ' + err.message });
+    return res.status(500).json({ error: 'Error de conexión con API Perú: ' + err.message });
   }
 });
 
