@@ -9,6 +9,26 @@
     <meta property="og:description" content="Sistema web para la gestión de almacén, lotes, programación, recepción, inventario y distribución de formatos de salud." />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script>
+      (function() {
+        try {
+          var originalFetch = window.fetch ? window.fetch.bind(window) : null;
+          var currentFetch = originalFetch;
+          Object.defineProperty(window, 'fetch', {
+            configurable: true,
+            enumerable: true,
+            get: function() {
+              return currentFetch;
+            },
+            set: function(newFetch) {
+              currentFetch = typeof newFetch === 'function' ? newFetch : originalFetch;
+            }
+          });
+        } catch (e) {
+          // ignore if already configured
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

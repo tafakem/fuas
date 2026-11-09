@@ -309,7 +309,8 @@ if (userCount.count === 0) {
     { renaes: '00005', nombre: 'C.S. MANCORA' },
     { renaes: '00006', nombre: 'P.S. CRUCETA' },
     { renaes: '00007', nombre: 'P.S. SALITRAL' },
-    { renaes: '00008', nombre: 'C.S. SOJIT' }
+    { renaes: '00008', nombre: 'C.S. SOJIT' },
+    { renaes: '00009', nombre: 'C.S. COMUNIDAD SALUDABLE' }
   ];
   const insertEst = db.prepare('INSERT INTO establishments (renaes, nombre) VALUES (?, ?)');
   for (const e of estSeed) {
@@ -778,12 +779,19 @@ app.get('/api/receptions', (req, res) => {
              COALESCE(e.nombre, 'Almacén Central DIRESA') as establishment_nombre, 
              b.codigo as batch_codigo,
              s.nombre as supplier_nombre, 
-             u.username as user_nombre
+             u.username as user_nombre,
+             wp.id as package_id,
+             wp.codigo_paquete
       FROM receptions r
       LEFT JOIN establishments e ON r.establishment_id = e.id
       LEFT JOIN batches b ON r.batch_id = b.id
       LEFT JOIN suppliers s ON r.supplier_id = s.id
       LEFT JOIN users u ON r.user_id = u.id
+      LEFT JOIN warehouse_packages wp ON (
+        (wp.range_start IS NOT NULL AND wp.range_start = printf('%05d', r.range_start) AND wp.range_end = printf('%05d', r.range_end))
+        OR (wp.ocr_raw_text LIKE '%' || r.documento || '%')
+      )
+      GROUP BY r.id
       ORDER BY r.id DESC
     `).all();
     res.json(list);
@@ -802,17 +810,32 @@ app.post('/api/receptions', (req, res) => {
     }
 
     const transaction = db.transaction(() => {
-      if (programming_id) {
-        // Validate programming and calculate ranges automatically if partial
-        const prog = db.prepare('SELECT * FROM programming WHERE id = ?').get(programming_id) as any;
-        if (!prog) throw new Error('Programación no encontrada');
+      if (programming_id || (establishment_id && batch_id)) {
+        let prog = programming_id 
+          ? db.prepare('SELECT * FROM programming WHERE id = ?').get(programming_id) as any 
+          : db.prepare('SELECT * FROM programming WHERE establishment_id = ? AND batch_id = ? ORDER BY id DESC LIMIT 1').get(establishment_id, batch_id) as any;
+
+        if (!prog) {
+          throw new Error('Debe existir una programación previa de FUAs registrada para el RENAES/Establecimiento y Lote especificados antes de ingresar recepciones.');
+        }
 
         const estId = establishment_id ? parseInt(establishment_id) : prog.establishment_id;
+
+        // Calculate pending to receive
+        const recSumRow = db.prepare(`
+          SELECT COALESCE(SUM(cantidad_recibida), 0) as total FROM receptions WHERE programming_id = ?
+        `).get(prog.id) as { total: number };
+        const totalYaRecibido = recSumRow.total || 0;
+        const pendienteRecibir = prog.cantidad - totalYaRecibido;
+
+        if (qty > pendienteRecibir) {
+          throw new Error(`Acción Bloqueada: La cantidad a ingresar (${qty.toLocaleString()} u.) supera la cantidad pendiente por recibir de la programación (${pendienteRecibir.toLocaleString()} u. restantes de ${prog.cantidad.toLocaleString()} u. programadas).`);
+        }
 
         // Check previous receptions for this programming to find next available correlative
         const lastRec = db.prepare(`
           SELECT MAX(range_end) as max_end FROM receptions WHERE programming_id = ?
-        `).get(programming_id) as { max_end: number | null };
+        `).get(prog.id) as { max_end: number | null };
 
         let rStart = range_start ? parseInt(range_start) : (lastRec && lastRec.max_end ? lastRec.max_end + 1 : prog.range_start);
         let rEnd = (range_start && range_end && parseInt(range_end) - parseInt(range_start) + 1 === qty) 
@@ -826,7 +849,7 @@ app.post('/api/receptions', (req, res) => {
         // Check if range overlap with previous receptions
         const existingReceptions = db.prepare(`
           SELECT range_start, range_end FROM receptions WHERE programming_id = ?
-        `).all(programming_id) as any[];
+        `).all(prog.id) as any[];
 
         for (const rec of existingReceptions) {
           if (rStart <= rec.range_end && rEnd >= rec.range_start) {
@@ -893,7 +916,33 @@ app.post('/api/receptions', (req, res) => {
         `).run(estId, prodId, batch_id ? parseInt(batch_id) : null, qty, `Ingreso Doc: ${documento}`, user_id || null);
       }
 
-      logAudit(user_id, username, 'CREATE_RECEPTION', `Registró recepción doc ${documento}, cantidad ${qty}`, req.ip || '127.0.0.1');
+      // Automatically generate a unique QR package in warehouse_packages
+      const countRow = db.prepare('SELECT COUNT(*) as count FROM warehouse_packages').get() as { count: number };
+      const createdPackageCode = `PKG-2026-${String(countRow.count + 1).padStart(5, '0')}`;
+      const fuaProd = db.prepare("SELECT id FROM products WHERE tipo = 'fua' LIMIT 1").get() as { id: number };
+      const packageProductId = fuaProd ? fuaProd.id : (product_id ? parseInt(product_id) : 1);
+
+      const pkgRes = db.prepare(`
+        INSERT INTO warehouse_packages (
+          codigo_paquete, product_id, establishment_id, cantidad_inicial, saldo,
+          batch_id, range_start, range_end, numero_paquete, ubicacion_almacen,
+          estado, ocr_raw_text, user_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Almacén Central - Sector A', 'en_almacen', ?, ?)
+      `).run(
+        createdPackageCode,
+        packageProductId,
+        establishment_id ? parseInt(establishment_id) : null,
+        qty,
+        qty,
+        batch_id ? parseInt(batch_id) : null,
+        range_start ? String(range_start).padStart(5, '0') : null,
+        range_end ? String(range_end).padStart(5, '0') : null,
+        '01/01',
+        `Recepción Doc: ${documento}`,
+        user_id || null
+      );
+
+      logAudit(user_id, username, 'CREATE_RECEPTION', `Registró recepción doc ${documento}, cantidad ${qty} y generó paquete QR ${createdPackageCode}`, req.ip || '127.0.0.1');
     });
 
     transaction();
@@ -1540,6 +1589,88 @@ app.post('/api/warehouse/packages', (req, res) => {
   }
 });
 
+app.put('/api/warehouse/packages/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      product_id,
+      establishment_id,
+      batch_id,
+      cantidad_inicial,
+      range_start,
+      range_end,
+      numero_paquete,
+      ubicacion_almacen,
+      user_id,
+      username
+    } = req.body;
+
+    const pkg = db.prepare('SELECT * FROM warehouse_packages WHERE id = ?').get(id) as any;
+    if (!pkg) {
+      return res.status(404).json({ error: 'Paquete no encontrado' });
+    }
+
+    const qty = parseInt(cantidad_inicial) || pkg.cantidad_inicial;
+    // Calculate new balance preserving delivered amount
+    const delivered = pkg.cantidad_inicial - pkg.saldo;
+    const newSaldo = Math.max(0, qty - delivered);
+
+    db.prepare(`
+      UPDATE warehouse_packages SET
+        product_id = ?,
+        establishment_id = ?,
+        batch_id = ?,
+        cantidad_inicial = ?,
+        saldo = ?,
+        range_start = ?,
+        range_end = ?,
+        numero_paquete = ?,
+        ubicacion_almacen = ?
+      WHERE id = ?
+    `).run(
+      parseInt(product_id) || pkg.product_id,
+      establishment_id ? parseInt(establishment_id) : pkg.establishment_id,
+      batch_id ? parseInt(batch_id) : pkg.batch_id,
+      qty,
+      newSaldo,
+      range_start || pkg.range_start,
+      range_end || pkg.range_end,
+      numero_paquete || pkg.numero_paquete,
+      ubicacion_almacen || pkg.ubicacion_almacen,
+      id
+    );
+
+    logAudit(user_id, username, 'UPDATE_PACKAGE', `Actualizó información del paquete ${pkg.codigo_paquete}`, req.ip || '127.0.0.1');
+    res.json({ success: true, message: `Paquete ${pkg.codigo_paquete} actualizado` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/warehouse/packages/:id', (req, res) => {
+  try {
+    const { id } = req.params;
+    const { user_id, username } = req.query;
+
+    const pkg = db.prepare('SELECT * FROM warehouse_packages WHERE id = ?').get(id) as any;
+    if (!pkg) {
+      return res.status(404).json({ error: 'Paquete no encontrado' });
+    }
+
+    // Check if package has delivered movements
+    const delCount = db.prepare('SELECT COUNT(*) as count FROM inventory_movements WHERE referencia LIKE ? AND tipo_movimiento = ?').get(`%${pkg.codigo_paquete}%`, 'salida') as { count: number };
+    if (delCount.count > 0) {
+      return res.status(400).json({ error: 'No se puede eliminar un paquete que tiene entregas registradas. Anule primero los comprobantes de salida.' });
+    }
+
+    db.prepare('DELETE FROM warehouse_packages WHERE id = ?').run(id);
+    logAudit(Number(user_id), String(username || 'admin'), 'DELETE_PACKAGE', `Eliminó el paquete ${pkg.codigo_paquete}`, req.ip || '127.0.0.1');
+    res.json({ success: true, message: `Paquete ${pkg.codigo_paquete} eliminado correctamente` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/warehouse/packages/:id/movement', (req, res) => {
   try {
     const { id } = req.params;
@@ -1560,7 +1691,7 @@ app.post('/api/warehouse/packages/:id/movement', (req, res) => {
         }
 
         const newSaldo = pkg.saldo - qty;
-        const newEstado = newSaldo === 0 ? 'entregado' : 'en_almacen';
+        const newEstado = newSaldo === 0 ? 'agotado' : 'en_almacen';
 
         db.prepare('UPDATE warehouse_packages SET saldo = ?, estado = ? WHERE id = ?').run(newSaldo, newEstado, pkg.id);
 
@@ -1592,6 +1723,34 @@ app.post('/api/warehouse/packages/:id/movement', (req, res) => {
           qty,
           pkg.range_start ? parseInt(pkg.range_start) : null,
           pkg.range_end ? parseInt(pkg.range_end) : null
+        );
+
+        // Deduct inventory stock
+        if (pkg.establishment_id && pkg.product_id) {
+          const st = db.prepare('SELECT id, stock_actual FROM inventory_stock WHERE establishment_id = ? AND product_id = ? AND estado = "disponible" ORDER BY id DESC LIMIT 1').get(pkg.establishment_id, pkg.product_id) as any;
+          if (st) {
+            const nextStock = Math.max(0, st.stock_actual - qty);
+            db.prepare('UPDATE inventory_stock SET stock_actual = ?, estado = ? WHERE id = ?').run(
+              nextStock,
+              nextStock === 0 ? 'entregado' : 'disponible',
+              st.id
+            );
+          }
+        }
+
+        // Record inventory movement
+        db.prepare(`
+          INSERT INTO inventory_movements (establishment_id, product_id, batch_id, tipo, cantidad, range_start, range_end, referencia, user_id)
+          VALUES (?, ?, ?, 'salida', ?, ?, ?, ?, ?)
+        `).run(
+          pkg.establishment_id || 1,
+          pkg.product_id,
+          pkg.batch_id,
+          qty,
+          pkg.range_start ? parseInt(pkg.range_start) : null,
+          pkg.range_end ? parseInt(pkg.range_end) : null,
+          `Entrega Paquete ${pkg.codigo_paquete} - Comp ${compNum} a ${receptor_nombre || 'Receptor'} (DNI ${receptor_dni || 'S/DNI'})`,
+          user_id || null
         );
 
         logAudit(user_id, username, 'PACKAGE_DELIVERY', `Entregó ${qty} u. del paquete ${pkg.codigo_paquete}, comp ${compNum}`, req.ip || '127.0.0.1');

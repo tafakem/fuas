@@ -461,7 +461,7 @@ export default function App() {
   const [warehousePackages, setWarehousePackages] = useState<any[]>([]);
   const [showPackageModal, setShowPackageModal] = useState(false);
   const [selectedPackage, setSelectedPackage] = useState<any>(null);
-  const [packageModalMode, setPackageModalMode] = useState<'create' | 'view'>('create');
+  const [packageModalMode, setPackageModalMode] = useState<'create' | 'edit' | 'view'>('create');
   const [packageForm, setPackageForm] = useState<any>({
     product_id: '',
     establishment_id: '',
@@ -576,13 +576,84 @@ export default function App() {
         if (cameraScannerTarget === 'ocr') {
           await processOCRWithBase64(dataUrl);
         } else {
-          showToast('✅ QR Capturado desde cámara. Procesando consulta de paquete...');
+          // In QR mode, open first available package or find matching
+          const targetPkg = warehousePackages.find(p => p.saldo > 0) || warehousePackages[0];
+          if (targetPkg) {
+            await openPackageByCode(targetPkg.codigo_paquete);
+          } else {
+            showToast('✅ Cámara QR finalizada.');
+          }
         }
       }
     } catch (err) {
       showToast('Error al tomar captura con la cámara', 'error');
     } finally {
       setIsCapturingCamera(false);
+    }
+  };
+
+  const openPackageByCode = async (code: string) => {
+    if (!code || !code.trim()) return;
+    try {
+      const cleanCode = code.trim();
+      const res = await fetch(`/api/warehouse/packages/${encodeURIComponent(cleanCode)}`);
+      const data = await res.json();
+      if (res.ok && data.id) {
+        setSelectedPackage(data);
+        setPackageModalMode('view');
+        setShowPackageModal(true);
+        showToast(`📦 Ficha de la caja ${data.codigo_paquete} abierta. Saldo: ${data.saldo} u.`);
+      } else {
+        showToast(data.error || `No se encontró ninguna caja con el código: "${cleanCode}"`, 'error');
+      }
+    } catch (err) {
+      showToast('Error al consultar caja por código QR', 'error');
+    }
+  };
+
+  const printPackageLabel = (pkg: any) => {
+    try {
+      const doc = new jsPDF({
+        orientation: 'landscape',
+        unit: 'mm',
+        format: [100, 60] // Etiqueta estándar térmica 100mm x 60mm
+      });
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.text('DIRESA PIURA - SUB REGION LUCIANO CASTILLO', 50, 7, { align: 'center' });
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.text('ETIQUETA DE CAJA / PAQUETE DE FORMATOS', 50, 11, { align: 'center' });
+      doc.line(5, 13, 95, 13);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.text(`CÓDIGO: ${pkg.codigo_paquete}`, 6, 18);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.text(`IPRESS: ${pkg.establishment_nombre || 'ALMACÉN CENTRAL'}`, 6, 23);
+      doc.text(`RENAES: ${pkg.renaes || '00000000'} | LOTE: ${pkg.batch_codigo || 'GENERAL'}`, 6, 28);
+      doc.text(`PRODUCTO: ${pkg.product_nombre || 'FUA'}`, 6, 33);
+      doc.text(`CANTIDAD: ${pkg.cantidad_inicial?.toLocaleString()} | SALDO: ${pkg.saldo?.toLocaleString()} u.`, 6, 38);
+      if (pkg.range_start) {
+        doc.text(`RANGOS: Del ${pkg.range_start} al ${pkg.range_end}`, 6, 43);
+      }
+      doc.text(`UBICACIÓN: ${pkg.ubicacion_almacen || 'Almacén Central'}`, 6, 48);
+
+      // Marco del código QR
+      doc.rect(72, 16, 23, 23);
+      doc.setFontSize(6);
+      doc.text('CÓDIGO QR', 83.5, 27, { align: 'center' });
+      doc.text(pkg.codigo_paquete, 83.5, 31, { align: 'center' });
+
+      doc.setFontSize(7);
+      doc.text('Conserve esta etiqueta para el control de entrega y trazabilidad.', 50, 56, { align: 'center' });
+
+      doc.save(`Etiqueta_${pkg.codigo_paquete}.pdf`);
+      showToast(`✅ Etiqueta de la caja ${pkg.codigo_paquete} generada en PDF para impresión`);
+    } catch (err) {
+      showToast('Error al generar etiqueta PDF', 'error');
     }
   };
 
@@ -2157,23 +2228,76 @@ export default function App() {
                                 <td className="py-3 px-4 font-bold text-slate-900">{r.cantidad_recibida}</td>
                                 <td className="py-3 px-4 text-slate-500 font-medium">{r.user_nombre || 'Sistema'}</td>
                                 <td className="py-3 px-4 text-right">
-                                  <button
-                                    onClick={async () => {
-                                      if (confirm(`¿Eliminar la recepción doc. ${r.documento}?`)) {
-                                        const res = await fetch(`/api/receptions/${r.id}?username=${currentUser.username}`, { method: 'DELETE' });
-                                        if (res.ok) {
-                                          showToast('Recepción eliminada');
-                                          loadData();
-                                        } else {
-                                          showToast('Error al eliminar', 'error');
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        let matchingPkg = warehousePackages.find(
+                                          (p: any) => (r.codigo_paquete && p.codigo_paquete === r.codigo_paquete) || 
+                                                      (r.package_id && p.id === r.package_id) ||
+                                                      (r.range_start && p.range_start && String(p.range_start) === String(r.range_start).padStart(5, '0'))
+                                        );
+
+                                        if (!matchingPkg && r.id) {
+                                          const pkgRes = await fetch('/api/warehouse/packages');
+                                          const pkgs = await pkgRes.json();
+                                          matchingPkg = pkgs.find(
+                                            (p: any) => (r.range_start && p.range_start && String(p.range_start) === String(r.range_start).padStart(5, '0')) ||
+                                                        (p.establishment_id === r.establishment_id && p.cantidad_inicial === r.cantidad_recibida)
+                                          );
                                         }
-                                      }
-                                    }}
-                                    className="p-1.5 bg-red-50 hover:bg-red-600 hover:text-white text-red-600 rounded-lg transition-colors"
-                                    title="Eliminar"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </button>
+
+                                        if (matchingPkg) {
+                                          const res = await fetch(`/api/warehouse/packages/${matchingPkg.id}`);
+                                          const data = await res.json();
+                                          setSelectedPackage(data);
+                                          setPackageModalMode('view');
+                                          setShowPackageModal(true);
+                                        } else {
+                                          // Fallback preview
+                                          setSelectedPackage({
+                                            codigo_paquete: r.codigo_paquete || `PKG-2026-${String(r.id).padStart(5, '0')}`,
+                                            product_nombre: r.range_start ? 'Formato FUA - Formulario Único de Atención' : 'Formato de Salud',
+                                            product_codigo: 'FUA-01',
+                                            unidad_control: 'formatos',
+                                            establishment_nombre: r.establishment_nombre,
+                                            renaes: r.renaes,
+                                            cantidad_inicial: r.cantidad_recibida,
+                                            saldo: r.cantidad_recibida,
+                                            batch_codigo: r.batch_codigo || 'General',
+                                            range_start: r.range_start ? String(r.range_start).padStart(5, '0') : null,
+                                            range_end: r.range_end ? String(r.range_end).padStart(5, '0') : null,
+                                            numero_paquete: '01/01',
+                                            ubicacion_almacen: 'Almacén Central'
+                                          });
+                                          setPackageModalMode('view');
+                                          setShowPackageModal(true);
+                                        }
+                                      }}
+                                      className="px-2.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg text-xs shadow flex items-center gap-1.5 transition-colors"
+                                      title="Imprimir o reimprimir etiqueta QR"
+                                    >
+                                      <QrCode className="w-3.5 h-3.5" /> Imprimir QR
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        if (confirm(`¿Eliminar la recepción doc. ${r.documento}?`)) {
+                                          const res = await fetch(`/api/receptions/${r.id}?username=${currentUser.username}`, { method: 'DELETE' });
+                                          if (res.ok) {
+                                            showToast('Recepción eliminada');
+                                            loadData();
+                                          } else {
+                                            showToast('Error al eliminar', 'error');
+                                          }
+                                        }
+                                      }}
+                                      className="p-1.5 bg-red-50 hover:bg-red-600 hover:text-white text-red-600 rounded-lg transition-colors"
+                                      title="Eliminar recepción"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -2254,8 +2378,45 @@ export default function App() {
         {activeTab === 'cart' && (
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-              <h2 className="text-xl font-bold text-slate-900 mb-1">Carrito Multiproducto de Entregas a IPRESS</h2>
-              <p className="text-xs text-slate-500 mb-6">Seleccione establecimiento, DNI del personal receptor y agregue FUAs, Historias Clínicas, HIS, Recetarios y Hojas de Referencia.</p>
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-4">
+                <div>
+                  <h2 className="text-xl font-bold text-slate-900 mb-0.5">Entregas y Despacho a IPRESS (Con Escaneo QR de Cajas)</h2>
+                  <p className="text-xs text-slate-500">Despacho de FUAs y formatos. Escanee el código QR físico de cualquier caja para abrir su ficha y entregarla directamente, o use el carrito consolidado.</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => openCameraScanner('qr')}
+                    className="px-4 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold rounded-xl text-xs shadow-md flex items-center gap-2 transition-all"
+                  >
+                    <QrCode className="w-4 h-4" /> Escanear QR de Caja
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const code = prompt('Ingrese el código de la caja (ej: PKG-2026-00001):');
+                      if (code) openPackageByCode(code);
+                    }}
+                    className="px-3.5 py-2.5 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-200 font-semibold rounded-xl text-xs shadow-xs flex items-center gap-1.5"
+                  >
+                    <Search className="w-3.5 h-3.5" /> Buscar Caja
+                  </button>
+                </div>
+              </div>
+
+              {/* Banner informativo de cajas */}
+              <div className="p-3 bg-purple-50/70 rounded-xl border border-purple-200 mb-6 flex items-center justify-between text-xs">
+                <span className="text-purple-900 font-medium flex items-center gap-1.5">
+                  <Package className="w-4 h-4 text-purple-600" /> Cajas en Almacén disponibles para entrega: <b>{warehousePackages.filter(p => p.saldo > 0).length} cajas con saldo</b> ({warehousePackages.filter(p => p.saldo <= 0).length} agotadas).
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('packages')}
+                  className="text-purple-700 hover:underline font-bold text-[11px]"
+                >
+                  Ver listado de cajas ➔
+                </button>
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <div>
@@ -3342,7 +3503,7 @@ export default function App() {
                             </div>
                           </div>
 
-                          <div className="pt-3 border-t border-slate-200 flex items-center justify-between gap-2">
+                          <div className="pt-3 border-t border-slate-200 flex items-center justify-between gap-1.5">
                             <button
                               type="button"
                               onClick={async () => {
@@ -3352,9 +3513,59 @@ export default function App() {
                                 setPackageModalMode('view');
                                 setShowPackageModal(true);
                               }}
-                              className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg text-xs shadow transition-colors"
+                              className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg text-xs shadow transition-colors"
                             >
-                              <QrCode className="w-3.5 h-3.5" /> Ficha & QR
+                              <Eye className="w-3.5 h-3.5" /> Ficha & QR
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPackageForm({
+                                  id: pkg.id,
+                                  codigo_paquete: pkg.codigo_paquete,
+                                  product_id: String(pkg.product_id),
+                                  establishment_id: pkg.establishment_id ? String(pkg.establishment_id) : '',
+                                  cantidad_inicial: pkg.cantidad_inicial,
+                                  batch_id: pkg.batch_id ? String(pkg.batch_id) : '',
+                                  range_start: pkg.range_start || '00001',
+                                  range_end: pkg.range_end || '03000',
+                                  numero_paquete: pkg.numero_paquete || '01/01',
+                                  ubicacion_almacen: pkg.ubicacion_almacen || 'Almacén Central',
+                                  foto_etiqueta: pkg.foto_etiqueta || '',
+                                  ocr_raw_text: pkg.ocr_raw_text || ''
+                                });
+                                setPackageModalMode('edit');
+                                setShowPackageModal(true);
+                              }}
+                              className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold rounded-lg text-xs transition-colors flex items-center gap-1"
+                              title="Editar datos del paquete"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" /> Editar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (confirm(`¿Está seguro de eliminar el paquete ${pkg.codigo_paquete}? esta acción no se puede deshacer.`)) {
+                                  try {
+                                    const res = await fetch(`/api/warehouse/packages/${pkg.id}?user_id=${currentUser.id}&username=${currentUser.username}`, {
+                                      method: 'DELETE'
+                                    });
+                                    const data = await res.json();
+                                    if (res.ok) {
+                                      showToast(`✅ Paquete ${pkg.codigo_paquete} eliminado correctamente`);
+                                      loadData();
+                                    } else {
+                                      showToast(data.error || 'Error al eliminar paquete', 'error');
+                                    }
+                                  } catch (err) {
+                                    showToast('Error de conexión al eliminar paquete', 'error');
+                                  }
+                                }
+                              }}
+                              className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-xs font-semibold transition-colors"
+                              title="Eliminar paquete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
                           </div>
                         </div>
@@ -3959,7 +4170,8 @@ export default function App() {
               });
 
               if (res.ok) {
-                showToast('Recepción registrada exitosamente en almacén');
+                const data = await res.json();
+                showToast(`✅ Recepción guardada y paquete QR ${data.codigo_paquete || ''} generado automáticamente`);
                 setShowRecModal(false);
                 loadData();
               } else {
@@ -4007,18 +4219,50 @@ export default function App() {
                     }}
                   />
 
-                  {recForm.programming_id && (
-                    <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl text-xs space-y-1">
-                      <p className="font-bold text-blue-900 flex items-center gap-1.5">
-                        <Building2 className="w-4 h-4 text-blue-600" />
-                        IPRESS Vinculada: {establishments.find(e => String(e.id) === String(recForm.establishment_id))?.nombre}
-                      </p>
-                      <p className="text-slate-600 font-mono text-[11px]">
-                        Lote: {batches.find(b => String(b.id) === String(recForm.batch_id))?.codigo || 'General'} | 
-                        Proveedor: {suppliers.find(s => String(s.id) === String(recForm.supplier_id))?.nombre || 'Interno'}
-                      </p>
-                    </div>
-                  )}
+                  {recForm.programming_id && (() => {
+                    const selProg = programming.find(p => String(p.id) === String(recForm.programming_id));
+                    if (!selProg) return null;
+                    const totProg = selProg.cantidad || 0;
+                    const totRecPrev = selProg.cantidad_recibida || 0;
+                    const pendRec = Math.max(0, totProg - totRecPrev);
+                    const isOver = recForm.cantidad_recibida > pendRec;
+
+                    return (
+                      <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-xl text-xs space-y-2">
+                        <div className="flex justify-between items-center">
+                          <p className="font-bold text-blue-900 flex items-center gap-1.5">
+                            <Building2 className="w-4 h-4 text-blue-600" />
+                            IPRESS: {selProg.establishment_nombre} (RENAES: {selProg.renaes})
+                          </p>
+                          <span className="px-2 py-0.5 bg-blue-600 text-white rounded text-[10px] font-mono font-bold">
+                            Lote {selProg.batch_codigo || 'General'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-center text-[11px] font-mono">
+                          <div className="bg-white p-2 rounded-lg border border-blue-100">
+                            <span className="block text-slate-500 text-[10px] uppercase font-sans">Total Programado</span>
+                            <span className="font-bold text-slate-800">{totProg.toLocaleString()} u.</span>
+                          </div>
+                          <div className="bg-white p-2 rounded-lg border border-blue-100">
+                            <span className="block text-slate-500 text-[10px] uppercase font-sans">Ya Recibido</span>
+                            <span className="font-bold text-emerald-700">{totRecPrev.toLocaleString()} u.</span>
+                          </div>
+                          <div className={`p-2 rounded-lg border ${pendRec > 0 ? 'bg-amber-50 border-amber-200 text-amber-900 font-bold' : 'bg-slate-100 border-slate-200 text-slate-600'}`}>
+                            <span className="block text-[10px] uppercase font-sans">Pendiente por Recibir</span>
+                            <span>{pendRec.toLocaleString()} u.</span>
+                          </div>
+                        </div>
+                        {isOver && (
+                          <div className="p-2.5 bg-rose-50 border border-rose-300 rounded-lg text-rose-900 text-xs flex items-start gap-1.5 font-medium">
+                            <AlertTriangle className="w-4 h-4 text-rose-600 flex-shrink-0 mt-0.5" />
+                            <span>
+                              <b>Recepción Bloqueada:</b> La cantidad indicada ({recForm.cantidad_recibida.toLocaleString()} u.) supera el pendiente de recibir ({pendRec.toLocaleString()} u. restantes de {totProg.toLocaleString()} u. programadas). Ingrese una cantidad parcial o igual a lo pendiente.
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : (
                 /* Non-FUA Demand Paperwork Selector (Central Warehouse Stock) */
@@ -4140,10 +4384,27 @@ export default function App() {
                 )}
               </div>
 
-              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
-                <button type="button" onClick={() => setShowRecModal(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold">Cancelar</button>
-                <button type="submit" className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow">Confirmar Recepción</button>
-              </div>
+              {(() => {
+                const selProg = recType === 'fua' ? programming.find(p => String(p.id) === String(recForm.programming_id)) : null;
+                const totProg = selProg ? (selProg.cantidad || 0) : 0;
+                const totRecPrev = selProg ? (selProg.cantidad_recibida || 0) : 0;
+                const pendRec = selProg ? Math.max(0, totProg - totRecPrev) : 0;
+                const isOver = recType === 'fua' && selProg && recForm.cantidad_recibida > pendRec;
+                const isBlocked = (recType === 'fua' && (!recForm.programming_id || isOver)) || recForm.cantidad_recibida <= 0;
+
+                return (
+                  <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                    <button type="button" onClick={() => setShowRecModal(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold">Cancelar</button>
+                    <button 
+                      type="submit" 
+                      disabled={isBlocked}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-xl text-xs font-semibold shadow"
+                    >
+                      Confirmar Recepción & Generar QR de Caja
+                    </button>
+                  </div>
+                );
+              })()}
             </form>
           </div>
         </div>
@@ -4943,11 +5204,17 @@ export default function App() {
               <div>
                 <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
                   <QrCode className="w-5 h-5 text-purple-600" />
-                  {packageModalMode === 'create' ? 'Registrar Nuevo Paquete & Escaneo OCR' : `Ficha del Paquete ${selectedPackage?.codigo_paquete || ''}`}
+                  {packageModalMode === 'create' 
+                    ? 'Registrar Nuevo Paquete & Escaneo OCR' 
+                    : packageModalMode === 'edit'
+                    ? `Editar Paquete ${packageForm.codigo_paquete || ''}`
+                    : `Ficha del Paquete ${selectedPackage?.codigo_paquete || ''}`}
                 </h3>
                 <p className="text-xs text-slate-500">
                   {packageModalMode === 'create' 
                     ? 'Escanee la etiqueta del proveedor o complete la información de la IPRESS y correlativos.'
+                    : packageModalMode === 'edit'
+                    ? 'Modifique la ubicación, producto, IPRESS destino o correlativos del paquete.'
                     : 'Consulte el saldo, ubicación, código QR e historial de movimientos del paquete.'}
                 </p>
               </div>
@@ -4960,12 +5227,14 @@ export default function App() {
               </button>
             </div>
 
-            {packageModalMode === 'create' ? (
+            {packageModalMode === 'create' || packageModalMode === 'edit' ? (
               <form onSubmit={async (e) => {
                 e.preventDefault();
                 try {
-                  const res = await fetch('/api/warehouse/packages', {
-                    method: 'POST',
+                  const url = packageModalMode === 'edit' ? `/api/warehouse/packages/${packageForm.id}` : '/api/warehouse/packages';
+                  const method = packageModalMode === 'edit' ? 'PUT' : 'POST';
+                  const res = await fetch(url, {
+                    method,
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                       ...packageForm,
@@ -4975,11 +5244,15 @@ export default function App() {
                   });
                   const data = await res.json();
                   if (res.ok) {
-                    showToast(`✅ Paquete ${data.codigo_paquete} registrado exitosamente en almacén`);
+                    showToast(
+                      packageModalMode === 'edit'
+                        ? `✅ Paquete ${packageForm.codigo_paquete} actualizado correctamente`
+                        : `✅ Paquete ${data.codigo_paquete} registrado exitosamente en almacén`
+                    );
                     setShowPackageModal(false);
                     loadData();
                   } else {
-                    showToast(data.error || 'Error al registrar paquete', 'error');
+                    showToast(data.error || 'Error al procesar paquete', 'error');
                   }
                 } catch (err: any) {
                   showToast('Error de conexión al guardar el paquete', 'error');
@@ -5235,13 +5508,19 @@ export default function App() {
                     <p className="text-slate-600 font-medium">
                       IPRESS: <span className="font-bold text-slate-900">{selectedPackage.establishment_nombre || 'Almacén Central'}</span>
                     </p>
-                    <p className="font-mono text-slate-700">RENAES: <span className="font-bold">{selectedPackage.renaes || '00000000'}</span></p>
-                    <div className="flex items-center gap-2 pt-1">
-                      <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-mono font-bold text-[11px]">
-                        Saldo: {selectedPackage.saldo?.toLocaleString() || 0} u.
-                      </span>
+                    <p className="font-mono text-slate-700">RENAES: <span className="font-bold">{selectedPackage.renaes || '00000000'}</span> | Lote: <span className="font-bold text-purple-700">{selectedPackage.batch_codigo || 'General'}</span></p>
+                    <div className="flex flex-wrap items-center gap-2 pt-1">
+                      {selectedPackage.saldo <= 0 ? (
+                        <span className="px-2.5 py-1 bg-rose-100 text-rose-800 border border-rose-300 rounded-lg font-mono font-extrabold text-[11px] flex items-center gap-1">
+                          🛑 CAJA AGOTADA (0 Saldo)
+                        </span>
+                      ) : (
+                        <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-lg font-mono font-bold text-[11px]">
+                          📦 Saldo Disponible: {selectedPackage.saldo?.toLocaleString() || 0} u.
+                        </span>
+                      )}
                       {selectedPackage.range_start && (
-                        <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-mono text-[11px]">
+                        <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-mono text-[11px]">
                           Rangos: {selectedPackage.range_start} - {selectedPackage.range_end}
                         </span>
                       )}
@@ -5251,100 +5530,136 @@ export default function App() {
                 </div>
 
                 {/* Move / Deliver partial form inside package view */}
-                <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                    <Truck className="w-4 h-4 text-purple-600" /> Registrar Entrega / Salida de este Paquete
-                  </h4>
-                  <form onSubmit={async (e) => {
-                    e.preventDefault();
-                    const form = e.target as any;
-                    const qty = parseInt(form.deliveryQty.value) || 0;
-                    const dni = form.receptorDni.value;
-                    const name = form.receptorName.value;
-                    if (qty <= 0 || qty > selectedPackage.saldo) {
-                      showToast(`La cantidad debe ser mayor a 0 y no superar el saldo (${selectedPackage.saldo})`, 'error');
-                      return;
-                    }
-                    try {
-                      const res = await fetch(`/api/warehouse/packages/${selectedPackage.id}/movement`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          tipo: 'entrega',
-                          cantidad: qty,
-                          receptor_dni: dni,
-                          receptor_nombre: name,
-                          user_id: currentUser.id,
-                          username: currentUser.username
-                        })
-                      });
-                      if (res.ok) {
-                        showToast(`✅ Entrega de ${qty} u. realizada desde paquete ${selectedPackage.codigo_paquete}`);
-                        setShowPackageModal(false);
-                        loadData();
-                      } else {
-                        const err = await res.json();
-                        showToast(err.error || 'Error al procesar movimiento', 'error');
+                {selectedPackage.saldo <= 0 ? (
+                  <div className="bg-slate-100 p-4 rounded-2xl border border-slate-300 text-center space-y-1">
+                    <p className="text-xs font-bold text-slate-800">🛑 Esta caja de FUAs se encuentra completamente Agotada (Saldo: 0 u.).</p>
+                    <p className="text-[11px] text-slate-500">Se conserva su código QR {selectedPackage.codigo_paquete} e historial para consultas de auditoría.</p>
+                  </div>
+                ) : (
+                  <div className="bg-white p-4 rounded-2xl border border-slate-200 space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
+                      <Truck className="w-4 h-4 text-purple-600" /> Registrar Entrega / Salida de este Paquete
+                    </h4>
+                    <form onSubmit={async (e) => {
+                      e.preventDefault();
+                      const form = e.target as any;
+                      const qty = parseInt(form.deliveryQty.value) || 0;
+                      const dni = form.receptorDni.value;
+                      const name = form.receptorName.value;
+                      if (qty <= 0 || qty > selectedPackage.saldo) {
+                        showToast(`La cantidad debe ser mayor a 0 y no superar el saldo (${selectedPackage.saldo})`, 'error');
+                        return;
                       }
-                    } catch (err) {
-                      showToast('Error de conexión', 'error');
-                    }
-                  }} className="space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Cant. Entregar</label>
-                        <input
-                          type="number"
-                          name="deliveryQty"
-                          required
-                          min="1"
-                          max={selectedPackage.saldo}
-                          defaultValue={selectedPackage.saldo}
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900"
-                        />
+                      try {
+                        const res = await fetch(`/api/warehouse/packages/${selectedPackage.id}/movement`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            tipo: 'entrega',
+                            cantidad: qty,
+                            receptor_dni: dni,
+                            receptor_nombre: name,
+                            user_id: currentUser.id,
+                            username: currentUser.username
+                          })
+                        });
+                        if (res.ok) {
+                          if (qty === selectedPackage.saldo) {
+                            showToast(`✅ Entrega de ${qty} u. realizada. La caja ${selectedPackage.codigo_paquete} ha quedado marcada como AGOTADA.`);
+                          } else {
+                            showToast(`✅ Entrega de ${qty} u. realizada desde paquete ${selectedPackage.codigo_paquete}`);
+                          }
+                          setShowPackageModal(false);
+                          loadData();
+                        } else {
+                          const err = await res.json();
+                          showToast(err.error || 'Error al procesar movimiento', 'error');
+                        }
+                      } catch (err) {
+                        showToast('Error de conexión', 'error');
+                      }
+                    }} className="space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">Cant. Entregar (Máx: {selectedPackage.saldo})</label>
+                          <input
+                            type="number"
+                            name="deliveryQty"
+                            required
+                            min="1"
+                            max={selectedPackage.saldo}
+                            defaultValue={selectedPackage.saldo}
+                            className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-900"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">DNI Receptor</label>
+                          <input
+                            type="text"
+                            name="receptorDni"
+                            required
+                            maxLength={8}
+                            placeholder="8 dígitos"
+                            className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-mono text-slate-900"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-600 mb-1">Nombre Receptor</label>
+                          <input
+                            type="text"
+                            name="receptorName"
+                            required
+                            placeholder="Nombres y Apellidos"
+                            className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900"
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">DNI Receptor</label>
-                        <input
-                          type="text"
-                          name="receptorDni"
-                          required
-                          maxLength={8}
-                          placeholder="8 dígitos"
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-mono text-slate-900"
-                        />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="submit"
+                          disabled={selectedPackage.saldo <= 0}
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold rounded-xl text-xs shadow flex items-center gap-1.5"
+                        >
+                          <Check className="w-4 h-4" /> Confirmar Entrega de Caja
+                        </button>
                       </div>
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">Nombre Receptor</label>
-                        <input
-                          type="text"
-                          name="receptorName"
-                          required
-                          placeholder="Nombres y Apellidos"
-                          className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900"
-                        />
-                      </div>
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => window.print()}
-                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl text-xs flex items-center gap-1"
-                      >
-                        <Printer className="w-3.5 h-3.5" /> Imprimir Etiqueta QR
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={selectedPackage.saldo <= 0}
-                        className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold rounded-xl text-xs shadow"
-                      >
-                        Confirmar Salida de Paquete
-                      </button>
-                    </div>
-                  </form>
-                </div>
+                    </form>
+                  </div>
+                )}
 
-                <div className="flex justify-end pt-2 border-t border-slate-100">
+                {/* Historial de Movimientos de la Caja */}
+                {selectedPackage.movements && selectedPackage.movements.length > 0 && (
+                  <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200 space-y-2">
+                    <p className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <Layers className="w-4 h-4 text-purple-600" /> Historial de Movimientos de esta Caja ({selectedPackage.movements.length}):
+                    </p>
+                    <div className="max-h-40 overflow-y-auto space-y-1.5">
+                      {selectedPackage.movements.map((m: any) => (
+                        <div key={m.id} className="p-2 bg-white rounded-xl border border-slate-200 text-[11px] flex justify-between items-center shadow-xs">
+                          <div>
+                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase mr-1.5 ${m.tipo === 'salida' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                              {m.tipo === 'salida' ? 'Entrega' : 'Ingreso'}
+                            </span>
+                            <span className="font-semibold text-slate-800">{m.referencia}</span>
+                            {m.created_at && <span className="text-[10px] text-slate-400 ml-2">{m.created_at}</span>}
+                          </div>
+                          <div className="text-right font-mono font-bold text-slate-900">
+                            {m.cantidad?.toLocaleString()} u.
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-between items-center pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => printPackageLabel(selectedPackage)}
+                    className="px-3.5 py-2 bg-purple-50 hover:bg-purple-100 text-purple-800 font-bold rounded-xl text-xs flex items-center gap-1.5 border border-purple-200 shadow-xs transition-colors"
+                  >
+                    <Printer className="w-4 h-4 text-purple-600" /> Imprimir / Reimprimir Etiqueta QR
+                  </button>
                   <button
                     type="button"
                     onClick={() => setShowPackageModal(false)}
