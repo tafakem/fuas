@@ -4,7 +4,7 @@ import {
   BarChart3, CheckCircle2, AlertTriangle, Plus, Search, Edit2, 
   Download, Upload, LogOut, Lock, User, FileSpreadsheet, Printer, 
   Eye, Check, X, RefreshCw, AlertCircle, ShoppingCart, Trash2,
-  Filter, Calendar, QrCode, Key, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
+  Filter, Calendar, QrCode, Key, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Camera
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -478,6 +478,126 @@ export default function App() {
   const [pkgSearch, setPkgSearch] = useState('');
   const [pkgFilterEst, setPkgFilterEst] = useState('todos');
   const [pkgFilterStatus, setPkgFilterStatus] = useState('todos');
+
+  // Camera & Image Capture States
+  const [showCameraScannerModal, setShowCameraScannerModal] = useState(false);
+  const [cameraScannerTarget, setCameraScannerTarget] = useState<'ocr' | 'qr'>('ocr');
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [isCapturingCamera, setIsCapturingCamera] = useState(false);
+  const videoRef = React.useRef<HTMLVideoElement | null>(null);
+
+  const openCameraScanner = async (target: 'ocr' | 'qr') => {
+    setCameraScannerTarget(target);
+    setCameraError(null);
+    setShowCameraScannerModal(true);
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setCameraError('El navegador o la conexión actual no soporta acceso directo a la cámara. Puede usar la opción de subir imagen.');
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } }
+      });
+      setCameraStream(stream);
+    } catch (err: any) {
+      console.error('Camera access error:', err);
+      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        setCameraError('Permiso de cámara denegado por el usuario o navegador. Puede conceder permisos en la barra de direcciones o usar "Subir Imagen".');
+      } else {
+        setCameraError('No se pudo inicializar la cámara del dispositivo. Puede cargar una fotografía guardada desde sus archivos.');
+      }
+    }
+  };
+
+  const closeCameraScanner = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+    setShowCameraScannerModal(false);
+    setCameraError(null);
+  };
+
+  useEffect(() => {
+    if (showCameraScannerModal && cameraStream && videoRef.current) {
+      videoRef.current.srcObject = cameraStream;
+      videoRef.current.play().catch(console.error);
+    }
+  }, [showCameraScannerModal, cameraStream]);
+
+  const processOCRWithBase64 = async (base64Img: string) => {
+    setIsScanningOCR(true);
+    try {
+      const res = await fetch('/api/warehouse/packages/ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64Img })
+      });
+      const data = await res.json();
+      if (res.ok && data.extracted) {
+        const ext = data.extracted;
+        const matchedEst = establishments.find(
+          e => e.renaes && String(e.renaes).padStart(8, '0') === String(ext.renaes).padStart(8, '0')
+        );
+        setPackageForm((prev: any) => ({
+          ...prev,
+          establishment_id: matchedEst ? String(matchedEst.id) : prev.establishment_id,
+          cantidad_inicial: ext.cantidad || prev.cantidad_inicial,
+          range_start: ext.range_start || prev.range_start,
+          range_end: ext.range_end || prev.range_end,
+          numero_paquete: ext.numero_paquete || prev.numero_paquete,
+          ocr_raw_text: ext.ocr_raw_text || '',
+          foto_etiqueta: base64Img
+        }));
+        showToast(`✅ OCR procesado: RENAES ${ext.renaes} (${ext.nombre_ipress}) reconocido.`);
+      } else {
+        showToast(data.error || 'No se pudo extraer información clara de la imagen', 'error');
+      }
+    } catch (err) {
+      showToast('Error al procesar lectura de la imagen de etiqueta OCR', 'error');
+    } finally {
+      setIsScanningOCR(false);
+    }
+  };
+
+  const captureCameraPhoto = async () => {
+    if (!videoRef.current) return;
+    setIsCapturingCamera(true);
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoRef.current.videoWidth || 640;
+      canvas.height = videoRef.current.videoHeight || 480;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        closeCameraScanner();
+        if (cameraScannerTarget === 'ocr') {
+          await processOCRWithBase64(dataUrl);
+        } else {
+          showToast('✅ QR Capturado desde cámara. Procesando consulta de paquete...');
+        }
+      }
+    } catch (err) {
+      showToast('Error al tomar captura con la cámara', 'error');
+    } finally {
+      setIsCapturingCamera(false);
+    }
+  };
+
+  const handleFileUploadOCR = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const base64Img = event.target?.result as string;
+      if (base64Img) {
+        await processOCRWithBase64(base64Img);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Modals & UI states
   const [searchTerm, setSearchTerm] = useState('');
@@ -4768,48 +4888,97 @@ export default function App() {
                 
                 {/* OCR Escaneo Box */}
                 <div className="bg-purple-50 p-4 rounded-xl border border-purple-200 space-y-3">
-                  <div className="flex justify-between items-center">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                     <span className="text-xs font-bold text-purple-900 flex items-center gap-1.5">
                       <QrCode className="w-4 h-4 text-purple-600" /> Escanear o Fotografiar Etiqueta (OCR)
                     </span>
-                    <button
-                      type="button"
-                      disabled={isScanningOCR}
-                      onClick={async () => {
-                        setIsScanningOCR(true);
-                        try {
-                          const res = await fetch('/api/warehouse/packages/ocr', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ image: 'demo_label_image_data' })
-                          });
-                          const data = await res.json();
-                          if (res.ok && data.extracted) {
-                            const ext = data.extracted;
-                            const matchedEst = establishments.find(e => e.renaes && String(e.renaes).padStart(8, '0') === String(ext.renaes).padStart(8, '0'));
-                            setPackageForm({
-                              ...packageForm,
-                              establishment_id: matchedEst ? String(matchedEst.id) : '',
-                              cantidad_inicial: ext.cantidad || 3000,
-                              range_start: ext.range_start || '00001',
-                              range_end: ext.range_end || '03000',
-                              numero_paquete: ext.numero_paquete || '01/01',
-                              ocr_raw_text: ext.ocr_raw_text || ''
+                    <div className="flex flex-wrap items-center gap-1.5 w-full sm:w-auto">
+                      {/* Botón 1: Cámara del dispositivo */}
+                      <button
+                        type="button"
+                        onClick={() => openCameraScanner('ocr')}
+                        className="px-3 py-1.5 bg-purple-700 hover:bg-purple-800 text-white font-semibold rounded-lg text-xs shadow flex items-center gap-1.5 transition-colors"
+                      >
+                        <Camera className="w-3.5 h-3.5" />
+                        Tomar Foto (Cámara)
+                      </button>
+
+                      {/* Botón 2: Cargar Archivo de Imagen */}
+                      <label className="px-3 py-1.5 bg-purple-100 hover:bg-purple-200 text-purple-900 font-semibold rounded-lg text-xs cursor-pointer flex items-center gap-1.5 border border-purple-300 transition-colors">
+                        <Upload className="w-3.5 h-3.5 text-purple-700" />
+                        Subir Imagen
+                        <input
+                          type="file"
+                          accept="image/*"
+                          capture="environment"
+                          onChange={handleFileUploadOCR}
+                          className="hidden"
+                        />
+                      </label>
+
+                      {/* Botón 3: Ejemplo Demo */}
+                      <button
+                        type="button"
+                        disabled={isScanningOCR}
+                        onClick={async () => {
+                          setIsScanningOCR(true);
+                          try {
+                            const res = await fetch('/api/warehouse/packages/ocr', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ image: 'demo_label_image_data' })
                             });
-                            showToast(`✅ OCR procesado: RENAES ${ext.renaes} (${ext.nombre_ipress}) reconocido.`);
+                            const data = await res.json();
+                            if (res.ok && data.extracted) {
+                              const ext = data.extracted;
+                              const matchedEst = establishments.find(e => e.renaes && String(e.renaes).padStart(8, '0') === String(ext.renaes).padStart(8, '0'));
+                              setPackageForm({
+                                ...packageForm,
+                                establishment_id: matchedEst ? String(matchedEst.id) : '',
+                                cantidad_inicial: ext.cantidad || 3000,
+                                range_start: ext.range_start || '00001',
+                                range_end: ext.range_end || '03000',
+                                numero_paquete: ext.numero_paquete || '01/01',
+                                ocr_raw_text: ext.ocr_raw_text || ''
+                              });
+                              showToast(`✅ OCR procesado: RENAES ${ext.renaes} (${ext.nombre_ipress}) reconocido.`);
+                            }
+                          } catch (err) {
+                            showToast('Error al procesar lectura de etiqueta OCR', 'error');
+                          } finally {
+                            setIsScanningOCR(false);
                           }
-                        } catch (err) {
-                          showToast('Error al procesar lectura de etiqueta OCR', 'error');
-                        } finally {
-                          setIsScanningOCR(false);
-                        }
-                      }}
-                      className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold rounded-lg text-xs shadow flex items-center gap-1.5"
-                    >
-                      {isScanningOCR ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
-                      Escanear Etiqueta Ejemplo
-                    </button>
+                        }}
+                        className="px-2.5 py-1.5 bg-white hover:bg-purple-100 text-purple-800 font-medium rounded-lg text-xs border border-purple-200 shadow-sm flex items-center gap-1.5"
+                      >
+                        {isScanningOCR ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Eye className="w-3.5 h-3.5" />}
+                        Ejemplo Demo
+                      </button>
+                    </div>
                   </div>
+
+                  {/* Previsualizaciones del OCR */}
+                  {packageForm.foto_etiqueta && (
+                    <div className="flex items-center gap-3 p-2 bg-white rounded-lg border border-purple-200">
+                      <img
+                        src={packageForm.foto_etiqueta}
+                        alt="Foto Etiqueta Capturada"
+                        className="w-16 h-16 object-cover rounded-md border border-slate-200"
+                      />
+                      <div className="flex-1 text-[11px]">
+                        <p className="font-semibold text-slate-800">Fotografía de la etiqueta adjuntada</p>
+                        <p className="text-slate-500">Imagen guardada junto con la información del paquete.</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPackageForm({ ...packageForm, foto_etiqueta: '' })}
+                        className="text-xs text-rose-600 hover:text-rose-800 font-medium underline"
+                      >
+                        Quitar
+                      </button>
+                    </div>
+                  )}
+
                   {packageForm.ocr_raw_text && (
                     <div className="bg-white p-2.5 rounded-lg border border-purple-200 text-[10px] font-mono text-purple-900 leading-relaxed">
                       <p className="font-bold text-purple-950 mb-0.5">Texto Extraído por OCR:</p>
@@ -5164,6 +5333,108 @@ export default function App() {
                 <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow">Guardar Formato</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Live Camera Scanner Modal */}
+      {showCameraScannerModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl max-w-lg w-full p-6 text-white space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-purple-500/20 text-purple-400 rounded-xl">
+                  <Camera className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white">
+                    {cameraScannerTarget === 'ocr' ? 'Cámara de Lectura de Etiquetas (OCR)' : 'Escáner de Código QR'}
+                  </h3>
+                  <p className="text-xs text-slate-400">Enfoque la etiqueta física o el código QR en el recuadro</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={closeCameraScanner}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {cameraError ? (
+              <div className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-4 text-center space-y-3">
+                <AlertTriangle className="w-8 h-8 text-rose-400 mx-auto" />
+                <p className="text-xs text-rose-200">{cameraError}</p>
+                <div className="pt-2 flex justify-center gap-2">
+                  <label className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs rounded-xl cursor-pointer shadow">
+                    Subir Fotografía desde Archivo
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={(e) => {
+                        closeCameraScanner();
+                        handleFileUploadOCR(e);
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => openCameraScanner(cameraScannerTarget)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl"
+                  >
+                    Reintentar Cámara
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="relative rounded-2xl overflow-hidden bg-black border border-slate-800 shadow-inner min-h-[260px] flex items-center justify-center">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full h-64 object-cover"
+                />
+                
+                {/* Visual Scanner Overlay */}
+                <div className="absolute inset-0 pointer-events-none border-2 border-dashed border-purple-400/60 m-8 rounded-xl flex items-center justify-center">
+                  <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-purple-400 to-transparent animate-pulse shadow-lg"></div>
+                </div>
+
+                <div className="absolute top-3 left-3 px-2.5 py-1 bg-black/60 backdrop-blur-md rounded-lg text-[10px] font-mono text-purple-300 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                  Transmisión en Vivo Encontrada
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-between items-center pt-2">
+              <button
+                type="button"
+                onClick={closeCameraScanner}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold"
+              >
+                Cancelar
+              </button>
+              
+              {!cameraError && (
+                <button
+                  type="button"
+                  disabled={isCapturingCamera}
+                  onClick={captureCameraPhoto}
+                  className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold rounded-xl text-xs shadow-lg flex items-center gap-2"
+                >
+                  {isCapturingCamera ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Camera className="w-4 h-4" />
+                  )}
+                  Capturar y Procesar Imagen
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
