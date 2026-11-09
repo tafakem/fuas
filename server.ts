@@ -1148,8 +1148,12 @@ app.get('/api/personnel', (req, res) => {
       SELECT p.id, p.dni, 
              COALESCE(NULLIF(p.nombres, ''), 'Personal') as nombres, 
              COALESCE(p.apellidos, '') as apellidos, 
+             p.establishment_id,
+             e.nombre as establishment_nombre,
+             e.renaes as establishment_renaes,
              p.created_at
       FROM reception_personnel p
+      LEFT JOIN establishments e ON p.establishment_id = e.id
       ORDER BY p.nombres, p.apellidos
     `).all();
     res.json(list);
@@ -1162,10 +1166,14 @@ app.get('/api/personnel/dni/:dni', (req, res) => {
   try {
     const { dni } = req.params;
     const person = db.prepare(`
-      SELECT id, dni, 
-             COALESCE(NULLIF(nombres, ''), 'Personal') as nombres, 
-             COALESCE(apellidos, '') as apellidos
+      SELECT p.id, p.dni, 
+             COALESCE(NULLIF(p.nombres, ''), 'Personal') as nombres, 
+             COALESCE(p.apellidos, '') as apellidos,
+             p.establishment_id,
+             e.nombre as establishment_nombre,
+             e.renaes as establishment_renaes
       FROM reception_personnel p
+      LEFT JOIN establishments e ON p.establishment_id = e.id
       WHERE p.dni = ?
     `).get(dni) as any;
 
@@ -1181,19 +1189,19 @@ app.get('/api/personnel/dni/:dni', (req, res) => {
 
 app.post('/api/personnel', (req, res) => {
   try {
-    const { id, dni, nombres, apellidos, username } = req.body;
+    const { id, dni, nombres, apellidos, establishment_id, username } = req.body;
+    const estId = establishment_id ? parseInt(establishment_id) : null;
     if (id) {
       db.prepare(`
-        UPDATE reception_personnel SET dni = ?, nombres = ?, apellidos = ? WHERE id = ?
-      `).run(dni, nombres, apellidos, id);
+        UPDATE reception_personnel SET dni = ?, nombres = ?, apellidos = ?, establishment_id = ? WHERE id = ?
+      `).run(dni, nombres, apellidos, estId, id);
       logAudit(null, username, 'UPDATE_PERSONNEL', `Actualizó personal receptor DNI ${dni} - ${nombres} ${apellidos}`, req.ip || '127.0.0.1');
     } else {
       db.prepare(`
-        INSERT INTO reception_personnel (dni, nombres, apellidos)
-        VALUES (?, ?, ?)
-        ON CONFLICT(dni) DO UPDATE SET nombres = ?, apellidos = ?
-      `).run(dni, nombres, apellidos, nombres, apellidos);
-      logAudit(null, username, 'SAVE_PERSONNEL', `Registró personal receptor DNI ${dni} - ${nombres} ${apellidos}`, req.ip || '127.0.0.1');
+        INSERT INTO reception_personnel (dni, nombres, apellidos, establishment_id)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(dni) DO UPDATE SET nombres = ?, apellidos = ?, establishment_id = COALESCE(?, establishment_id)
+      `).run(dni, nombres, apellidos, estId, nombres, apellidos, estId);
     }
     res.json({ success: true });
   } catch (err: any) {

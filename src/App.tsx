@@ -10,6 +10,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import * as XLSX from 'xlsx';
 import QRCode from 'qrcode';
+import jsQR from 'jsqr';
 
 function RealQRCode({ value, size = 120 }: { value: string; size?: number }) {
   const [dataUrl, setDataUrl] = useState<string>('');
@@ -521,13 +522,51 @@ export default function App() {
   const [isCapturingCamera, setIsCapturingCamera] = useState(false);
   const videoRef = React.useRef<HTMLVideoElement | null>(null);
 
+  const decodeQRFromBase64 = (dataUrl: string): Promise<string | null> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return resolve(null);
+          ctx.drawImage(img, 0, 0);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: "attemptBoth"
+          });
+          if (code && code.data && code.data.trim()) {
+            resolve(code.data.trim());
+          } else {
+            resolve(null);
+          }
+        } catch (err) {
+          console.error('Error decodificando QR con jsQR:', err);
+          resolve(null);
+        }
+      };
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    });
+  };
+
+  const extractPackageCode = (rawText: string): string => {
+    if (!rawText) return '';
+    const match = rawText.match(/PKG-\d{4}-\d+/i);
+    if (match) return match[0].toUpperCase();
+    return rawText.trim();
+  };
+
   const openCameraScanner = async (target: 'ocr' | 'qr') => {
     setCameraScannerTarget(target);
     setCameraError(null);
     setShowCameraScannerModal(true);
+
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        setCameraError('El navegador o la conexión actual no soporta acceso directo a la cámara. Puede usar la opción de subir imagen.');
+        setCameraError('CONEXION_HTTP_MOVIL');
         return;
       }
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -535,12 +574,8 @@ export default function App() {
       });
       setCameraStream(stream);
     } catch (err: any) {
-      console.error('Camera access error:', err);
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-        setCameraError('Permiso de cámara denegado por el usuario o navegador. Puede conceder permisos en la barra de direcciones o usar "Subir Imagen".');
-      } else {
-        setCameraError('No se pudo inicializar la cámara del dispositivo. Puede cargar una fotografía guardada desde sus archivos.');
-      }
+      console.warn('Camera access note:', err);
+      setCameraError('CONEXION_HTTP_MOVIL');
     }
   };
 
@@ -559,6 +594,38 @@ export default function App() {
       videoRef.current.play().catch(console.error);
     }
   }, [showCameraScannerModal, cameraStream]);
+
+  // Live video stream QR scanner
+  useEffect(() => {
+    let scanInterval: any = null;
+    if (showCameraScannerModal && cameraStream && videoRef.current && cameraScannerTarget === 'qr') {
+      scanInterval = setInterval(() => {
+        if (!videoRef.current || videoRef.current.readyState < 2) return;
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = videoRef.current.videoWidth || 480;
+          canvas.height = videoRef.current.videoHeight || 480;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return;
+          ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: "dontInvert"
+          });
+          if (code && code.data) {
+            clearInterval(scanInterval);
+            const pkgCode = extractPackageCode(code.data);
+            closeCameraScanner();
+            openPackageByCode(pkgCode);
+            showToast(`✅ Código QR ${pkgCode} detectado en vivo`);
+          }
+        } catch (e) {}
+      }, 350);
+    }
+    return () => {
+      if (scanInterval) clearInterval(scanInterval);
+    };
+  }, [showCameraScannerModal, cameraStream, cameraScannerTarget]);
 
   const processOCRWithBase64 = async (base64Img: string) => {
     setIsScanningOCR(true);
@@ -606,24 +673,73 @@ export default function App() {
       if (ctx) {
         ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
         const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-        closeCameraScanner();
         if (cameraScannerTarget === 'ocr') {
+          closeCameraScanner();
           await processOCRWithBase64(dataUrl);
         } else {
-          // In QR mode, open first available package or find matching
-          const targetPkg = warehousePackages.find(p => p.saldo > 0) || warehousePackages[0];
-          if (targetPkg) {
-            await openPackageByCode(targetPkg.codigo_paquete);
+          showToast('🔄 Analizando fotografía para decodificar código QR...');
+          const decoded = await decodeQRFromBase64(dataUrl);
+          if (decoded) {
+            const pkgCode = extractPackageCode(decoded);
+            closeCameraScanner();
+            await openPackageByCode(pkgCode);
+            showToast(`✅ Código QR ${pkgCode} decodificado exitosamente`);
           } else {
-            showToast('✅ Cámara QR finalizada.');
+            showToast('No se detectó código QR en la captura. Intente enfocar la etiqueta más de cerca.', 'error');
           }
         }
       }
     } catch (err) {
-      showToast('Error al tomar captura con la cámara', 'error');
+      showToast('Error al capturar imagen', 'error');
     } finally {
       setIsCapturingCamera(false);
     }
+  };
+
+  const handleImageFileScanned = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const base64Img = event.target?.result as string;
+      if (!base64Img) return;
+
+      if (cameraScannerTarget === 'qr') {
+        showToast('🔄 Procesando fotografía para detectar código QR...');
+        const decoded = await decodeQRFromBase64(base64Img);
+        if (decoded) {
+          const pkgCode = extractPackageCode(decoded);
+          closeCameraScanner();
+          await openPackageByCode(pkgCode);
+          showToast(`✅ Código QR ${pkgCode} reconocido exitosamente`);
+        } else {
+          // Fallback: Check if OCR can extract code from photo
+          try {
+            const res = await fetch('/api/warehouse/packages/ocr', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ image: base64Img })
+            });
+            const data = await res.json();
+            const ocrText = data.extracted?.ocr_raw_text || '';
+            const match = ocrText.match(/PKG-\d{4}-\d+/i);
+            if (match) {
+              closeCameraScanner();
+              await openPackageByCode(match[0].toUpperCase());
+              showToast(`✅ Código ${match[0].toUpperCase()} reconocido en la etiqueta`);
+              return;
+            }
+          } catch (e) {}
+
+          showToast('No se detectó un código QR legible en la foto. Intente enfocar más de cerca o ingrese el código manualmente.', 'error');
+        }
+      } else {
+        closeCameraScanner();
+        await processOCRWithBase64(base64Img);
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
   };
 
   const openPackageByCode = async (code: string) => {
@@ -742,8 +858,10 @@ export default function App() {
 
   // Personnel Modal
   const [showPersModal, setShowPersModal] = useState(false);
-  const [persForm, setPersForm] = useState<any>({ id: null, dni: '', nombres: '', apellidos: '' });
+  const [persForm, setPersForm] = useState<any>({ id: null, dni: '', nombres: '', apellidos: '', establishment_id: '' });
   const [isSearchingDNI, setIsSearchingDNI] = useState(false);
+  const [cartDniStatus, setCartDniStatus] = useState<'idle' | 'searching' | 'found_db' | 'found_apiperu' | 'not_found'>('idle');
+  const [cartDniMessage, setCartDniMessage] = useState('');
 
   // Delivery / Cart state
   const [cartEstablishment, setCartEstablishment] = useState('');
@@ -895,25 +1013,62 @@ export default function App() {
     showToast('Sesión cerrada');
   };
 
-  // DNI Lookup for Reception Personnel
+  // DNI Lookup for Reception Personnel with DB check and API Perú fallback
   const handleDniLookup = async (dni: string) => {
     setCartDni(dni);
-    if (dni.length === 8) {
-      try {
-        const res = await fetch(`/api/personnel/dni/${dni}`);
-        const data = await res.json();
-        if (data.found) {
-          setCartReceptorName(`${data.person.nombres} ${data.person.apellidos}`);
-          if (data.person.establishment_id) {
-            setCartEstablishment(String(data.person.establishment_id));
-          }
-          showToast('Personal receptor encontrado');
-        } else {
-          showToast('DNI no registrado. Ingrese nombres y apellidos manualmente.', 'error');
+    if (!dni || dni.length !== 8) {
+      setCartDniStatus('idle');
+      setCartDniMessage('');
+      return;
+    }
+
+    setIsSearchingDNI(true);
+    setCartDniStatus('searching');
+    setCartDniMessage('Buscando personal en base de datos...');
+
+    try {
+      // 1. Search in local registered personnel
+      const res = await fetch(`/api/personnel/dni/${dni}`);
+      const data = await res.json();
+      if (data.found && data.person) {
+        const fullName = `${data.person.nombres} ${data.person.apellidos}`.trim();
+        setCartReceptorName(fullName);
+        if (data.person.establishment_id && !cartEstablishment) {
+          setCartEstablishment(String(data.person.establishment_id));
         }
-      } catch (err) {
-        console.error(err);
+        setCartDniStatus('found_db');
+        setCartDniMessage(`Personal registrado: ${fullName}${data.person.establishment_nombre ? ` (${data.person.establishment_nombre})` : ''}`);
+        showToast(`✅ Personal receptor registrado: ${fullName}`);
+        setIsSearchingDNI(false);
+        return;
       }
+
+      // 2. Fallback to API Perú / RENIEC
+      setCartDniMessage('DNI no está registrado en el sistema. Consultando RENIEC / API Perú...');
+      try {
+        const extRes = await fetch(`/api/external/dni/${dni}`);
+        const extData = await extRes.json();
+        if (extRes.ok && extData.success) {
+          const fullName = `${extData.nombres} ${extData.apellidos}`.trim();
+          setCartReceptorName(fullName);
+          setCartDniStatus('found_apiperu');
+          setCartDniMessage(`Identificado en RENIEC: ${fullName} (No registrado en el sistema)`);
+          showToast(`ℹ️ Identificado en RENIEC: ${fullName}. Puede registrarlo con un clic.`);
+          setIsSearchingDNI(false);
+          return;
+        }
+      } catch (extErr) {}
+
+      // 3. Not registered in DB nor found in API Perú
+      setCartDniStatus('not_found');
+      setCartDniMessage('Personal no registrado en el sistema. Puede pulsar "Derivar a Registro" para registrarlo.');
+      showToast('DNI no registrado en el sistema.', 'error');
+    } catch (err) {
+      console.error(err);
+      setCartDniStatus('not_found');
+      setCartDniMessage('Error al verificar DNI.');
+    } finally {
+      setIsSearchingDNI(false);
     }
   };
 
@@ -2435,6 +2590,16 @@ export default function App() {
                   >
                     <QrCode className="w-4 h-4" /> Escanear QR de Caja
                   </button>
+                  <label className="px-3.5 py-2.5 bg-purple-50 hover:bg-purple-100 text-purple-900 border border-purple-300 font-semibold rounded-xl text-xs shadow-xs flex items-center gap-1.5 cursor-pointer transition-colors" title="Abrir cámara del celular para capturar código QR">
+                    <Camera className="w-3.5 h-3.5 text-purple-700" /> Foto con Cámara Celular
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      onChange={handleImageFileScanned}
+                      className="hidden"
+                    />
+                  </label>
                   <button
                     type="button"
                     onClick={() => {
@@ -2464,7 +2629,7 @@ export default function App() {
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">1. Establecimiento Destino</label>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">1. Establecimiento Destino (IPRESS)</label>
                   <SearchableEstablishmentSelect
                     establishments={establishments}
                     value={cartEstablishment}
@@ -2472,29 +2637,161 @@ export default function App() {
                     placeholder="Escriba RENAES o Nombre de IPRESS..."
                     required
                   />
+                  {personnel.filter(p => !cartEstablishment || String(p.establishment_id) === cartEstablishment).length > 0 && (
+                    <div className="mt-2.5">
+                      <label className="block text-[10px] font-semibold text-slate-500 mb-1">Personal registrado en esta IPRESS:</label>
+                      <select
+                        value={personnel.find(p => p.dni === cartDni)?.id || ''}
+                        onChange={(e) => {
+                          const found = personnel.find(p => String(p.id) === e.target.value);
+                          if (found) {
+                            setCartDni(found.dni);
+                            const fullName = `${found.nombres} ${found.apellidos}`.trim();
+                            setCartReceptorName(fullName);
+                            if (found.establishment_id && !cartEstablishment) {
+                              setCartEstablishment(String(found.establishment_id));
+                            }
+                            setCartDniStatus('found_db');
+                            setCartDniMessage(`Personal registrado: ${fullName}`);
+                            showToast(`Personal seleccionado: ${fullName}`);
+                          }
+                        }}
+                        className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-700"
+                      >
+                        <option value="">-- Seleccionar personal asignado --</option>
+                        {personnel
+                          .filter(p => !cartEstablishment || String(p.establishment_id) === cartEstablishment)
+                          .map(p => (
+                            <option key={p.id} value={p.id}>
+                              {p.dni} - {p.nombres} {p.apellidos}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">2. DNI del Personal Receptor</label>
-                  <input
-                    type="text"
-                    maxLength={8}
-                    placeholder="Ingrese DNI (8 dígitos)"
-                    value={cartDni}
-                    onChange={e => handleDniLookup(e.target.value)}
-                    className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-600 font-mono"
-                  />
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600">2. DNI del Personal Receptor</label>
+                    {isSearchingDNI && (
+                      <span className="text-[10px] text-blue-600 font-semibold flex items-center gap-1">
+                        <RefreshCw className="w-3 h-3 animate-spin" /> Buscando...
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      maxLength={8}
+                      placeholder="Ingrese DNI (8 dígitos)"
+                      value={cartDni}
+                      onChange={e => handleDniLookup(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-600 font-mono pr-20"
+                    />
+                    <button
+                      type="button"
+                      disabled={isSearchingDNI || cartDni.length !== 8}
+                      onClick={() => handleDniLookup(cartDni)}
+                      className="absolute right-1.5 top-1.5 bottom-1.5 px-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-colors"
+                      title="Buscar en base de datos y RENIEC"
+                    >
+                      <Search className="w-3 h-3" /> Buscar
+                    </button>
+                  </div>
+
+                  {/* Feedback Status Alert */}
+                  {cartDniStatus === 'found_db' && (
+                    <div className="mt-2 p-2 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center justify-between">
+                      <span className="flex items-center gap-1 font-semibold text-[11px]">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Registrado en el sistema
+                      </span>
+                      <span className="text-[10px] font-mono text-emerald-600">Listo para despacho</span>
+                    </div>
+                  )}
+
+                  {cartDniStatus === 'found_apiperu' && (
+                    <div className="mt-2 p-2.5 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-900 space-y-1.5">
+                      <div className="flex items-center gap-1 font-bold text-[11px]">
+                        <AlertCircle className="w-3.5 h-3.5 text-amber-600" /> Identificado en RENIEC (No registrado)
+                      </div>
+                      <p className="text-[11px] text-amber-800 font-medium">{cartReceptorName}</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const parts = cartReceptorName.trim().split(' ');
+                          const apellidos = parts.length > 2 ? parts.slice(-2).join(' ') : parts.slice(1).join(' ');
+                          const nombres = parts.length > 2 ? parts.slice(0, -2).join(' ') : parts[0] || '';
+                          setPersForm({
+                            id: null,
+                            dni: cartDni,
+                            nombres: nombres,
+                            apellidos: apellidos,
+                            establishment_id: cartEstablishment || ''
+                          });
+                          setShowPersModal(true);
+                        }}
+                        className="w-full py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] rounded-lg shadow-sm flex items-center justify-center gap-1 transition-colors"
+                      >
+                        <Plus className="w-3 h-3" /> Registrar este Personal en el Sistema
+                      </button>
+                    </div>
+                  )}
+
+                  {cartDniStatus === 'not_found' && (
+                    <div className="mt-2 p-2.5 bg-rose-50 border border-rose-300 rounded-xl text-xs text-rose-900 space-y-1.5">
+                      <div className="flex items-center gap-1 font-bold text-[11px]">
+                        <AlertTriangle className="w-3.5 h-3.5 text-rose-600" /> Personal No Encontrado
+                      </div>
+                      <p className="text-[11px] text-rose-700">El DNI {cartDni} no figura en el padrón de receptores.</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPersForm({
+                            id: null,
+                            dni: cartDni,
+                            nombres: cartReceptorName || '',
+                            apellidos: '',
+                            establishment_id: cartEstablishment || ''
+                          });
+                          setShowPersModal(true);
+                        }}
+                        className="w-full py-1.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-[11px] rounded-lg shadow-sm flex items-center justify-center gap-1 transition-colors"
+                      >
+                        <Plus className="w-3 h-3" /> Derivar a Registro de Personal
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">3. Nombres y Apellidos del Receptor</label>
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600">3. Nombres y Apellidos del Receptor</label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPersForm({
+                          id: null,
+                          dni: cartDni || '',
+                          nombres: cartReceptorName || '',
+                          apellidos: '',
+                          establishment_id: cartEstablishment || ''
+                        });
+                        setShowPersModal(true);
+                      }}
+                      className="text-blue-600 hover:underline font-bold text-[11px] flex items-center gap-0.5"
+                    >
+                      <Plus className="w-3 h-3" /> Nuevo Personal
+                    </button>
+                  </div>
                   <input
                     type="text"
-                    placeholder="Nombres y Apellidos"
+                    placeholder="Nombres y Apellidos del personal receptor"
                     value={cartReceptorName}
                     onChange={e => setCartReceptorName(e.target.value)}
                     className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-600"
                   />
+                  <p className="text-[10px] text-slate-500 mt-1">Este nombre se imprimirá en el comprobante de salida y acta de entrega.</p>
                 </div>
               </div>
 
@@ -4782,8 +5079,16 @@ export default function App() {
                 body: JSON.stringify({ ...persForm, username: currentUser.username })
               });
               if (res.ok) {
-                showToast('Personal guardado exitosamente');
+                showToast('Personal receptor guardado exitosamente');
                 setShowPersModal(false);
+                setCartDni(persForm.dni);
+                const fullName = `${persForm.nombres} ${persForm.apellidos}`.trim();
+                setCartReceptorName(fullName);
+                if (persForm.establishment_id) {
+                  setCartEstablishment(String(persForm.establishment_id));
+                }
+                setCartDniStatus('found_db');
+                setCartDniMessage(`Personal registrado: ${fullName}`);
                 loadData();
               } else {
                 const err = await res.json();
@@ -4816,7 +5121,7 @@ export default function App() {
                             nombres: data.nombres || '',
                             apellidos: data.apellidos || ''
                           });
-                          showToast('✅ DNI consultado exitosamente en API Perú');
+                          showToast('✅ DNI consultado exitosamente en API Perú / RENIEC');
                         } else {
                           showToast(data.error || 'DNI no encontrado', 'error');
                         }
@@ -4858,9 +5163,25 @@ export default function App() {
                 />
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-2">Establecimiento / IPRESS Asignada (Opcional)</label>
+                <select
+                  value={persForm.establishment_id || ''}
+                  onChange={e => setPersForm({ ...persForm, establishment_id: e.target.value })}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-slate-800"
+                >
+                  <option value="">-- Sin asignación fija (General) --</option>
+                  {establishments.map((est: any) => (
+                    <option key={est.id} value={est.id}>
+                      {est.renaes} - {est.nombre}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="flex justify-end gap-3 pt-4">
                 <button type="button" onClick={() => setShowPersModal(false)} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold">Cancelar</button>
-                <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow">Guardar Personal</button>
+                <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-semibold shadow">Guardar y Vincular Personal</button>
               </div>
             </form>
           </div>
@@ -5651,6 +5972,28 @@ export default function App() {
                             name="receptorDni"
                             required
                             maxLength={8}
+                            defaultValue={cartDni}
+                            onChange={async (e) => {
+                              const val = e.target.value;
+                              if (val.length === 8) {
+                                try {
+                                  const r = await fetch(`/api/personnel/dni/${val}`);
+                                  const d = await r.json();
+                                  const nameInput = document.getElementById('pkgReceptorNameInput') as HTMLInputElement;
+                                  if (d.found && d.person && nameInput) {
+                                    nameInput.value = `${d.person.nombres} ${d.person.apellidos}`.trim();
+                                    showToast(`✅ Personal registrado: ${d.person.nombres} ${d.person.apellidos}`);
+                                  } else {
+                                    const extR = await fetch(`/api/external/dni/${val}`);
+                                    const extD = await extR.json();
+                                    if (extD.success && nameInput) {
+                                      nameInput.value = `${extD.nombres} ${extD.apellidos}`.trim();
+                                      showToast(`ℹ️ Identificado en RENIEC: ${extD.nombres} ${extD.apellidos}`);
+                                    }
+                                  }
+                                } catch (err) {}
+                              }
+                            }}
                             placeholder="8 dígitos"
                             className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs font-mono text-slate-900"
                           />
@@ -5659,8 +6002,10 @@ export default function App() {
                           <label className="block text-[11px] font-semibold text-slate-600 mb-1">Nombre Receptor</label>
                           <input
                             type="text"
+                            id="pkgReceptorNameInput"
                             name="receptorName"
                             required
+                            defaultValue={cartReceptorName}
                             placeholder="Nombres y Apellidos"
                             className="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5 text-xs text-slate-900"
                           />
@@ -5842,29 +6187,45 @@ export default function App() {
             </div>
 
             {cameraError ? (
-              <div className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-4 text-center space-y-3">
-                <AlertTriangle className="w-8 h-8 text-rose-400 mx-auto" />
-                <p className="text-xs text-rose-200">{cameraError}</p>
-                <div className="pt-2 flex justify-center gap-2">
-                  <label className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs rounded-xl cursor-pointer shadow">
-                    Subir Fotografía desde Archivo
+              <div className="bg-purple-950/40 border border-purple-500/30 rounded-2xl p-5 text-center space-y-4">
+                <div className="w-14 h-14 bg-purple-500/20 text-purple-400 rounded-2xl flex items-center justify-center mx-auto border border-purple-500/30">
+                  <Camera className="w-7 h-7" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white">Captura Directa con la Cámara de su Celular</h4>
+                  <p className="text-xs text-purple-200 mt-1 max-w-sm mx-auto">
+                    Al estar conectado por IP local, toque el botón a continuación para abrir la cámara de su teléfono y tomar la foto de la etiqueta o código QR.
+                  </p>
+                </div>
+                <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2.5">
+                  <label className="w-full sm:w-auto px-5 py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 text-white font-bold text-xs rounded-xl cursor-pointer shadow-lg flex items-center justify-center gap-2 transition-all">
+                    <Camera className="w-4 h-4" />
+                    Abrir Cámara y Tomar Foto
                     <input
                       type="file"
                       accept="image/*"
                       capture="environment"
-                      onChange={(e) => {
-                        closeCameraScanner();
-                        handleFileUploadOCR(e);
-                      }}
+                      onChange={handleImageFileScanned}
+                      className="hidden"
+                    />
+                  </label>
+                  <label className="w-full sm:w-auto px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl cursor-pointer flex items-center justify-center gap-2">
+                    <Upload className="w-4 h-4" />
+                    Elegir de Galería / Archivo
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageFileScanned}
                       className="hidden"
                     />
                   </label>
                   <button
                     type="button"
                     onClick={() => openCameraScanner(cameraScannerTarget)}
-                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs rounded-xl"
+                    className="px-3 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs rounded-xl flex items-center justify-center"
+                    title="Reintentar Transmisión en Vivo"
                   >
-                    Reintentar Cámara
+                    <RefreshCw className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
