@@ -4,7 +4,7 @@ import {
   BarChart3, CheckCircle2, AlertTriangle, Plus, Search, Edit2, 
   Download, Upload, LogOut, Lock, User, FileSpreadsheet, Printer, 
   Eye, Check, X, RefreshCw, AlertCircle, ShoppingCart, Trash2,
-  Filter, Calendar, QrCode, Key
+  Filter, Calendar, QrCode, Key, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -346,6 +346,91 @@ function SearchableProgrammingSelect({
   );
 }
 
+function PaginationControls({
+  currentPage,
+  totalItems,
+  pageSize,
+  onPageChange,
+  onPageSizeChange
+}: {
+  currentPage: number;
+  totalItems: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (size: number) => void;
+}) {
+  const totalPages = Math.ceil(totalItems / pageSize) || 1;
+  const startItem = totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+  const endItem = Math.min(currentPage * pageSize, totalItems);
+
+  return (
+    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-200 text-xs">
+      <div className="flex flex-wrap items-center gap-2 text-slate-600">
+        <span>Mostrando <strong className="text-slate-900 font-bold">{startItem}</strong> a <strong className="text-slate-900 font-bold">{endItem}</strong> de <strong className="text-slate-900 font-bold">{totalItems}</strong> registros</span>
+        <span className="text-slate-300 hidden sm:inline">|</span>
+        <label className="flex items-center gap-1.5">
+          <span>Mostrar:</span>
+          <select
+            value={pageSize}
+            onChange={(e) => {
+              onPageSizeChange(Number(e.target.value));
+              onPageChange(1);
+            }}
+            className="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs text-slate-800 font-semibold focus:outline-none focus:ring-1 focus:ring-blue-600"
+          >
+            <option value={10}>10 por pág.</option>
+            <option value={25}>25 por pág.</option>
+            <option value={50}>50 por pág.</option>
+            <option value={100}>100 por pág.</option>
+          </select>
+        </label>
+      </div>
+
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          disabled={currentPage <= 1}
+          onClick={() => onPageChange(1)}
+          className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent font-medium transition-colors"
+          title="Primera página"
+        >
+          <ChevronsLeft className="w-4 h-4" />
+        </button>
+        <button
+          type="button"
+          disabled={currentPage <= 1}
+          onClick={() => onPageChange(currentPage - 1)}
+          className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent font-semibold flex items-center gap-1 transition-colors"
+        >
+          <ChevronLeft className="w-4 h-4" /> Anterior
+        </button>
+        
+        <span className="px-3 py-1 bg-blue-50 text-blue-900 border border-blue-200 rounded-lg font-bold text-xs shadow-sm">
+          Pág. {currentPage} / {totalPages}
+        </span>
+
+        <button
+          type="button"
+          disabled={currentPage >= totalPages}
+          onClick={() => onPageChange(currentPage + 1)}
+          className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent font-semibold flex items-center gap-1 transition-colors"
+        >
+          Siguiente <ChevronRight className="w-4 h-4" />
+        </button>
+        <button
+          type="button"
+          disabled={currentPage >= totalPages}
+          onClick={() => onPageChange(totalPages)}
+          className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent font-medium transition-colors"
+          title="Última página"
+        >
+          <ChevronsRight className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   // Auth state
   const [currentUser, setCurrentUser] = useState<any>(() => {
@@ -469,6 +554,25 @@ export default function App() {
   const [reportEndDate, setReportEndDate] = useState('');
   const [reportEstId, setReportEstId] = useState('todos');
   const [reportSearchQuery, setReportSearchQuery] = useState('');
+
+  // Module Pagination States
+  const [estPage, setEstPage] = useState(1);
+  const [estPageSize, setEstPageSize] = useState(25);
+
+  const [progPage, setProgPage] = useState(1);
+  const [progPageSize, setProgPageSize] = useState(25);
+
+  const [recPage, setRecPage] = useState(1);
+  const [recPageSize, setRecPageSize] = useState(25);
+
+  const [persPage, setPersPage] = useState(1);
+  const [persPageSize, setPersPageSize] = useState(25);
+
+  const [pkgPage, setPkgPage] = useState(1);
+  const [pkgPageSize, setPkgPageSize] = useState(25);
+
+  const [reportPage, setReportPage] = useState(1);
+  const [reportPageSize, setReportPageSize] = useState(25);
 
   // Notifications / Feedback
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -1123,89 +1227,115 @@ export default function App() {
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-              <div className="flex items-center gap-3 mb-6">
-                <Search className="w-5 h-5 text-slate-400" />
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <Search className="w-5 h-5 text-slate-400 shrink-0" />
                 <input
                   type="text"
                   placeholder="Buscar por código RENAES o nombre de establecimiento..."
                   value={searchTerm}
-                  onChange={e => setSearchTerm(e.target.value)}
+                  onChange={e => { setSearchTerm(e.target.value); setEstPage(1); }}
                   className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-slate-500 uppercase">
-                      <th className="pb-3">Código RENAES</th>
-                      <th className="pb-3">Nombre del Establecimiento</th>
-                      <th className="pb-3">Estado</th>
-                      <th className="pb-3 text-right">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {establishments
-                      .filter(e => e.renaes.includes(searchTerm) || e.nombre.toLowerCase().includes(searchTerm.toLowerCase()))
-                      .map((est: any) => (
-                        <tr key={est.id} className="hover:bg-slate-50">
-                          <td className="py-3 font-mono font-bold text-blue-600">{est.renaes}</td>
-                          <td className="py-3 font-medium text-slate-800">{est.nombre}</td>
-                          <td className="py-3">
-                            <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${est.activo ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
-                              {est.activo ? 'Activo' : 'Desactivado'}
-                            </span>
-                          </td>
-                          <td className="py-3 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <button
-                                onClick={async () => {
-                                  const res = await fetch(`/api/establishments/${est.id}/history`);
-                                  const data = await res.json();
-                                  if (res.ok) {
-                                    setSelectedEstHistory(data);
-                                    setShowHistoryModal(true);
-                                  } else {
-                                    showToast('Error al cargar historial', 'error');
-                                  }
-                                }}
-                                className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors"
-                                title="Ver historial y trazabilidad"
-                              >
-                                <Eye className="w-3.5 h-3.5" /> Historial
-                              </button>
-                              <button
-                                onClick={() => { setEstForm(est); setShowEstModal(true); }}
-                                className="p-1.5 bg-slate-100 hover:bg-blue-600 hover:text-white rounded-lg text-slate-600 transition-colors"
-                                title="Editar"
-                              >
-                                <Edit2 className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={async () => {
-                                  if (confirm(`¿Eliminar el establecimiento ${est.nombre}?`)) {
-                                    const res = await fetch(`/api/establishments/${est.id}?username=${currentUser.username}`, { method: 'DELETE' });
-                                    if (res.ok) {
-                                      showToast('Establecimiento eliminado');
-                                      loadData();
-                                    } else {
-                                      showToast('Error al eliminar', 'error');
-                                    }
-                                  }
-                                }}
-                                className="p-1.5 bg-red-50 hover:bg-red-600 hover:text-white text-red-600 rounded-lg transition-colors"
-                                title="Eliminar"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {(() => {
+                const filteredEsts = establishments.filter(e => 
+                  (e.renaes || '').includes(searchTerm) || 
+                  (e.nombre || '').toLowerCase().includes(searchTerm.toLowerCase())
+                );
+                const paginatedEsts = filteredEsts.slice((estPage - 1) * estPageSize, estPage * estPageSize);
+
+                return (
+                  <>
+                    <div className="overflow-x-auto rounded-xl border border-slate-200">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="bg-slate-100 border-b border-slate-200 text-slate-600 uppercase font-bold tracking-wider">
+                            <th className="py-3.5 px-4">Código RENAES</th>
+                            <th className="py-3.5 px-4">Nombre del Establecimiento (IPRESS)</th>
+                            <th className="py-3.5 px-4">Estado</th>
+                            <th className="py-3.5 px-4 text-right">Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {paginatedEsts.length === 0 ? (
+                            <tr>
+                              <td colSpan={4} className="py-8 text-center text-slate-500 italic">
+                                No se encontraron establecimientos con el filtro "{searchTerm}"
+                              </td>
+                            </tr>
+                          ) : (
+                            paginatedEsts.map((est: any, idx: number) => (
+                              <tr key={est.id} className={idx % 2 === 0 ? 'bg-white hover:bg-slate-50' : 'bg-slate-50/50 hover:bg-slate-100/80'}>
+                                <td className="py-3 px-4 font-mono font-bold text-blue-600">{est.renaes}</td>
+                                <td className="py-3 px-4 font-bold text-slate-800">{est.nombre}</td>
+                                <td className="py-3 px-4">
+                                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${est.activo ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}>
+                                    {est.activo ? 'Activo' : 'Desactivado'}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-right">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <button
+                                      onClick={async () => {
+                                        const res = await fetch(`/api/establishments/${est.id}/history`);
+                                        const data = await res.json();
+                                        if (res.ok) {
+                                          setSelectedEstHistory(data);
+                                          setShowHistoryModal(true);
+                                        } else {
+                                          showToast('Error al cargar historial', 'error');
+                                        }
+                                      }}
+                                      className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-600 hover:text-white text-indigo-700 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors"
+                                      title="Ver historial y trazabilidad"
+                                    >
+                                      <Eye className="w-3.5 h-3.5" /> Historial
+                                    </button>
+                                    <button
+                                      onClick={() => { setEstForm(est); setShowEstModal(true); }}
+                                      className="p-1.5 bg-slate-100 hover:bg-blue-600 hover:text-white rounded-lg text-slate-600 transition-colors"
+                                      title="Editar"
+                                    >
+                                      <Edit2 className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      onClick={async () => {
+                                        if (confirm(`¿Eliminar el establecimiento ${est.nombre}?`)) {
+                                          const res = await fetch(`/api/establishments/${est.id}?username=${currentUser.username}`, { method: 'DELETE' });
+                                          if (res.ok) {
+                                            showToast('Establecimiento eliminado');
+                                            loadData();
+                                          } else {
+                                            showToast('Error al eliminar', 'error');
+                                          }
+                                        }
+                                      }}
+                                      className="p-1.5 bg-red-50 hover:bg-red-600 hover:text-white text-red-600 rounded-lg transition-colors"
+                                      title="Eliminar"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <PaginationControls
+                      currentPage={estPage}
+                      totalItems={filteredEsts.length}
+                      pageSize={estPageSize}
+                      onPageChange={setEstPage}
+                      onPageSizeChange={setEstPageSize}
+                    />
+                  </>
+                );
+              })()}
             </div>
           </div>
         )}
@@ -1707,11 +1837,11 @@ export default function App() {
               </div>
 
               {/* Tabla de Programación con CRUD */}
-              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-                <div className="flex justify-between items-center mb-4">
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-4">
+                <div className="flex justify-between items-center">
                   <h3 className="text-sm font-bold text-slate-900">Listado de Programación de Formatos FUA</h3>
                   <span className="text-xs font-mono font-semibold text-slate-500">
-                    Mostrando {filteredProgramming.length} registro(s)
+                    Total {filteredProgramming.length} registro(s)
                   </span>
                 </div>
 
@@ -1724,101 +1854,116 @@ export default function App() {
                     </p>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead>
-                        <tr className="border-b border-slate-200 text-slate-500 uppercase">
-                          <th className="pb-3">ID</th>
-                          <th className="pb-3">Establecimiento (RENAES)</th>
-                          <th className="pb-3">Lote</th>
-                          <th className="pb-3">Rango Asignado</th>
-                          <th className="pb-3">Cantidad</th>
-                          <th className="pb-3">Origen / Proveedor</th>
-                          <th className="pb-3">Recibido</th>
-                          <th className="pb-3">Fecha</th>
-                          <th className="pb-3 text-right">Acciones</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {filteredProgramming.map((p: any) => {
-                          const porcentaje = p.cantidad > 0 ? Math.round((p.cantidad_recibida / p.cantidad) * 100) : 0;
-                          return (
-                            <tr key={p.id} className="hover:bg-slate-50">
-                              <td className="py-3 font-mono font-bold text-slate-700">#{p.id}</td>
-                              <td className="py-3 font-medium text-slate-900">
-                                {p.establishment_nombre} 
-                                <span className="ml-1 px-1.5 py-0.5 bg-slate-100 text-slate-600 font-mono text-[10px] rounded border border-slate-200">
-                                  {p.renaes}
-                                </span>
-                              </td>
-                              <td className="py-3 font-bold text-blue-600">Lote {p.batch_codigo}</td>
-                              <td className="py-3 font-mono font-bold text-emerald-600">Del {p.range_start} al {p.range_end}</td>
-                              <td className="py-3 font-bold text-slate-900">{p.cantidad.toLocaleString()}</td>
-                              <td className="py-3 text-slate-600">
-                                {p.origen === 'impresion_propia' ? (
-                                  <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded-full font-semibold text-[10px]">
-                                    Imp. Propia
-                                  </span>
-                                ) : (
-                                  <span className="font-medium text-slate-700">
-                                    {p.supplier_nombre || 'Proveedor'}
-                                  </span>
-                                )}
-                              </td>
-                              <td className="py-3">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-semibold text-slate-700">{p.cantidad_recibida} / {p.cantidad}</span>
-                                  <div className="w-16 bg-slate-200 h-2 rounded-full overflow-hidden">
-                                    <div className="bg-emerald-500 h-full" style={{ width: `${Math.min(porcentaje, 100)}%` }}></div>
-                                  </div>
-                                  <span className="text-[10px] font-mono text-slate-500">{porcentaje}%</span>
-                                </div>
-                              </td>
-                              <td className="py-3 text-slate-500">{p.created_at?.substring(0, 10)}</td>
-                              <td className="py-3 text-right">
-                                <div className="flex items-center justify-end gap-1.5">
-                                  <button
-                                    onClick={() => {
-                                      setProgForm({
-                                        id: p.id,
-                                        establishment_id: String(p.establishment_id),
-                                        batch_id: String(p.batch_id),
-                                        cantidad: p.cantidad,
-                                        supplier_id: p.supplier_id ? String(p.supplier_id) : '',
-                                        origen: p.origen || 'proveedor'
-                                      });
-                                      setShowProgModal(true);
-                                    }}
-                                    className="p-1.5 bg-slate-100 hover:bg-blue-600 hover:text-white rounded-lg text-slate-600 transition-colors"
-                                    title="Editar Programación"
-                                  >
-                                    <Edit2 className="w-3.5 h-3.5" />
-                                  </button>
-                                  <button
-                                    onClick={async () => {
-                                      if (confirm(`¿Eliminar la programación FUA #${p.id}?`)) {
-                                        const res = await fetch(`/api/programming/${p.id}?username=${currentUser.username}`, { method: 'DELETE' });
-                                        if (res.ok) {
-                                          showToast('Programación eliminada');
-                                          loadData();
-                                        } else {
-                                          showToast('Error al eliminar', 'error');
-                                        }
-                                      }
-                                    }}
-                                    className="p-1.5 bg-red-50 hover:bg-red-600 hover:text-white text-red-600 rounded-lg transition-colors"
-                                    title="Eliminar Programación"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                  <>
+                    {(() => {
+                      const paginatedProgramming = filteredProgramming.slice((progPage - 1) * progPageSize, progPage * progPageSize);
+                      return (
+                        <div className="overflow-x-auto rounded-xl border border-slate-200">
+                          <table className="w-full text-left text-xs">
+                            <thead>
+                              <tr className="bg-slate-100 border-b border-slate-200 text-slate-600 uppercase font-bold tracking-wider">
+                                <th className="py-3.5 px-4">ID</th>
+                                <th className="py-3.5 px-4">Establecimiento (RENAES)</th>
+                                <th className="py-3.5 px-4">Lote</th>
+                                <th className="py-3.5 px-4">Rango Asignado</th>
+                                <th className="py-3.5 px-4">Cantidad</th>
+                                <th className="py-3.5 px-4">Origen / Proveedor</th>
+                                <th className="py-3.5 px-4">Recibido</th>
+                                <th className="py-3.5 px-4">Fecha</th>
+                                <th className="py-3.5 px-4 text-right">Acciones</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {paginatedProgramming.map((p: any, idx: number) => {
+                                const porcentaje = p.cantidad > 0 ? Math.round((p.cantidad_recibida / p.cantidad) * 100) : 0;
+                                return (
+                                  <tr key={p.id} className={idx % 2 === 0 ? 'bg-white hover:bg-slate-50' : 'bg-slate-50/50 hover:bg-slate-100/80'}>
+                                    <td className="py-3 px-4 font-mono font-bold text-slate-700">#{p.id}</td>
+                                    <td className="py-3 px-4 font-bold text-slate-900">
+                                      {p.establishment_nombre} 
+                                      <span className="ml-1.5 px-1.5 py-0.5 bg-slate-100 text-slate-600 font-mono text-[10px] rounded border border-slate-200">
+                                        {p.renaes}
+                                      </span>
+                                    </td>
+                                    <td className="py-3 px-4 font-bold text-blue-600">Lote {p.batch_codigo}</td>
+                                    <td className="py-3 px-4 font-mono font-bold text-emerald-600">Del {p.range_start} al {p.range_end}</td>
+                                    <td className="py-3 px-4 font-bold text-slate-900">{p.cantidad.toLocaleString()}</td>
+                                    <td className="py-3 px-4 text-slate-600">
+                                      {p.origen === 'impresion_propia' ? (
+                                        <span className="px-2 py-0.5 bg-purple-100 text-purple-800 rounded-full font-semibold text-[10px]">
+                                          Imp. Propia
+                                        </span>
+                                      ) : (
+                                        <span className="font-medium text-slate-700">
+                                          {p.supplier_nombre || 'Proveedor'}
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="py-3 px-4">
+                                      <div className="flex items-center gap-2">
+                                        <span className="font-semibold text-slate-700">{p.cantidad_recibida} / {p.cantidad}</span>
+                                        <div className="w-16 bg-slate-200 h-2 rounded-full overflow-hidden">
+                                          <div className="bg-emerald-500 h-full" style={{ width: `${Math.min(porcentaje, 100)}%` }}></div>
+                                        </div>
+                                        <span className="text-[10px] font-mono text-slate-500">{porcentaje}%</span>
+                                      </div>
+                                    </td>
+                                    <td className="py-3 px-4 text-slate-500">{p.created_at?.substring(0, 10)}</td>
+                                    <td className="py-3 px-4 text-right">
+                                      <div className="flex items-center justify-end gap-1.5">
+                                        <button
+                                          onClick={() => {
+                                            setProgForm({
+                                              id: p.id,
+                                              establishment_id: String(p.establishment_id),
+                                              batch_id: String(p.batch_id),
+                                              cantidad: p.cantidad,
+                                              supplier_id: p.supplier_id ? String(p.supplier_id) : '',
+                                              origen: p.origen || 'proveedor'
+                                            });
+                                            setShowProgModal(true);
+                                          }}
+                                          className="p-1.5 bg-slate-100 hover:bg-blue-600 hover:text-white rounded-lg text-slate-600 transition-colors"
+                                          title="Editar Programación"
+                                        >
+                                          <Edit2 className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          onClick={async () => {
+                                            if (confirm(`¿Eliminar la programación FUA #${p.id}?`)) {
+                                              const res = await fetch(`/api/programming/${p.id}?username=${currentUser.username}`, { method: 'DELETE' });
+                                              if (res.ok) {
+                                                showToast('Programación eliminada');
+                                                loadData();
+                                              } else {
+                                                showToast('Error al eliminar', 'error');
+                                              }
+                                            }
+                                          }}
+                                          className="p-1.5 bg-red-50 hover:bg-red-600 hover:text-white text-red-600 rounded-lg transition-colors"
+                                          title="Eliminar Programación"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })()}
+
+                    <PaginationControls
+                      currentPage={progPage}
+                      totalItems={filteredProgramming.length}
+                      pageSize={progPageSize}
+                      onPageChange={setProgPage}
+                      onPageSizeChange={setProgPageSize}
+                    />
+                  </>
                 )}
               </div>
             </div>
@@ -1849,59 +1994,84 @@ export default function App() {
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-slate-500 uppercase">
-                      <th className="pb-3">Fecha</th>
-                      <th className="pb-3">Doc / Guía</th>
-                      <th className="pb-3">Establecimiento</th>
-                      <th className="pb-3">Tipo Ingreso</th>
-                      <th className="pb-3">Detalle / Rango</th>
-                      <th className="pb-3">Cantidad</th>
-                      <th className="pb-3">Responsable</th>
-                      <th className="pb-3 text-right">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {receptions.map((r: any) => (
-                      <tr key={r.id} className="hover:bg-slate-50">
-                        <td className="py-3 text-slate-600">{r.fecha_recepcion}</td>
-                        <td className="py-3 font-mono font-bold text-blue-600">{r.documento}</td>
-                        <td className="py-3 font-medium text-slate-900">{r.establishment_nombre}</td>
-                        <td className="py-3">
-                          <span className="px-2 py-0.5 bg-slate-100 text-slate-800 rounded-full text-[10px] font-semibold uppercase">
-                            {r.tipo_ingreso}
-                          </span>
-                        </td>
-                        <td className="py-3 font-mono text-emerald-600">{r.range_start ? `FUA Del ${r.range_start} al ${r.range_end}` : 'Formato sin correlativo (Stock)'}</td>
-                        <td className="py-3 font-bold text-slate-900">{r.cantidad_recibida}</td>
-                        <td className="py-3 text-slate-500">{r.user_nombre || 'Sistema'}</td>
-                        <td className="py-3 text-right">
-                          <button
-                            onClick={async () => {
-                              if (confirm(`¿Eliminar la recepción doc. ${r.documento}?`)) {
-                                const res = await fetch(`/api/receptions/${r.id}?username=${currentUser.username}`, { method: 'DELETE' });
-                                if (res.ok) {
-                                  showToast('Recepción eliminada');
-                                  loadData();
-                                } else {
-                                  showToast('Error al eliminar', 'error');
-                                }
-                              }
-                            }}
-                            className="p-1.5 bg-red-50 hover:bg-red-600 hover:text-white text-red-600 rounded-lg transition-colors"
-                            title="Eliminar"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-4">
+              {receptions.length === 0 ? (
+                <div className="text-center py-12 border-2 border-dashed border-slate-200 rounded-xl">
+                  <Truck className="w-10 h-10 text-slate-400 mx-auto mb-2" />
+                  <p className="text-sm font-bold text-slate-700">No hay recepciones físicas registradas</p>
+                  <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
+                    Utilice el botón "Registrar Recepción" para realizar ingresos de FUAs o formatos a demanda.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {(() => {
+                    const paginatedRecs = receptions.slice((recPage - 1) * recPageSize, recPage * recPageSize);
+                    return (
+                      <div className="overflow-x-auto rounded-xl border border-slate-200">
+                        <table className="w-full text-left text-xs">
+                          <thead>
+                            <tr className="bg-slate-100 border-b border-slate-200 text-slate-600 uppercase font-bold tracking-wider">
+                              <th className="py-3.5 px-4">Fecha</th>
+                              <th className="py-3.5 px-4">Doc / Guía</th>
+                              <th className="py-3.5 px-4">Establecimiento (IPRESS)</th>
+                              <th className="py-3.5 px-4">Tipo Ingreso</th>
+                              <th className="py-3.5 px-4">Detalle / Rango</th>
+                              <th className="py-3.5 px-4">Cantidad</th>
+                              <th className="py-3.5 px-4">Responsable</th>
+                              <th className="py-3.5 px-4 text-right">Acciones</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {paginatedRecs.map((r: any, idx: number) => (
+                              <tr key={r.id} className={idx % 2 === 0 ? 'bg-white hover:bg-slate-50' : 'bg-slate-50/50 hover:bg-slate-100/80'}>
+                                <td className="py-3 px-4 text-slate-600 font-medium">{r.fecha_recepcion}</td>
+                                <td className="py-3 px-4 font-mono font-bold text-blue-600">{r.documento}</td>
+                                <td className="py-3 px-4 font-bold text-slate-900">{r.establishment_nombre}</td>
+                                <td className="py-3 px-4">
+                                  <span className="px-2.5 py-1 bg-slate-100 text-slate-800 rounded-full text-[10px] font-bold uppercase border border-slate-200">
+                                    {r.tipo_ingreso}
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 font-mono text-emerald-700 font-bold">{r.range_start ? `FUA Del ${r.range_start} al ${r.range_end}` : 'Formato sin correlativo (Stock)'}</td>
+                                <td className="py-3 px-4 font-bold text-slate-900">{r.cantidad_recibida}</td>
+                                <td className="py-3 px-4 text-slate-500 font-medium">{r.user_nombre || 'Sistema'}</td>
+                                <td className="py-3 px-4 text-right">
+                                  <button
+                                    onClick={async () => {
+                                      if (confirm(`¿Eliminar la recepción doc. ${r.documento}?`)) {
+                                        const res = await fetch(`/api/receptions/${r.id}?username=${currentUser.username}`, { method: 'DELETE' });
+                                        if (res.ok) {
+                                          showToast('Recepción eliminada');
+                                          loadData();
+                                        } else {
+                                          showToast('Error al eliminar', 'error');
+                                        }
+                                      }
+                                    }}
+                                    className="p-1.5 bg-red-50 hover:bg-red-600 hover:text-white text-red-600 rounded-lg transition-colors"
+                                    title="Eliminar"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  })()}
+
+                  <PaginationControls
+                    currentPage={recPage}
+                    totalItems={receptions.length}
+                    pageSize={recPageSize}
+                    onPageChange={setRecPage}
+                    onPageSizeChange={setRecPageSize}
+                  />
+                </>
+              )}
             </div>
           </div>
         )}
@@ -2385,77 +2555,101 @@ export default function App() {
               </button>
             </div>
 
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-              <div className="flex items-center gap-3 mb-6">
-                <Search className="w-5 h-5 text-slate-400" />
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <Search className="w-5 h-5 text-slate-400 shrink-0" />
                 <input
                   type="text"
                   placeholder="Buscar personal por DNI, nombres o apellidos..."
                   value={searchTerm}
-                  onChange={e => setSearchTerm(e.target.value)}
+                  onChange={e => { setSearchTerm(e.target.value); setPersPage(1); }}
                   className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
               </div>
 
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead>
-                    <tr className="border-b border-slate-200 text-slate-500 uppercase">
-                      <th className="pb-3">DNI</th>
-                      <th className="pb-3">Nombres</th>
-                      <th className="pb-3">Apellidos</th>
-                      <th className="pb-3">Fecha de Registro</th>
-                      <th className="pb-3 text-right">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {personnel
-                      .filter((p: any) => {
-                        const sTerm = (searchTerm || '').toLowerCase();
-                        const pDni = String(p?.dni || '');
-                        const pNom = String(p?.nombres || '').toLowerCase();
-                        const pApe = String(p?.apellidos || '').toLowerCase();
-                        return pDni.includes(sTerm) || pNom.includes(sTerm) || pApe.includes(sTerm);
-                      })
-                      .map((p: any) => (
-                      <tr key={p.id} className="hover:bg-slate-50">
-                        <td className="py-3 font-mono font-bold text-blue-600">{p.dni}</td>
-                        <td className="py-3 font-medium text-slate-900">{p.nombres || '-'}</td>
-                        <td className="py-3 font-medium text-slate-900">{p.apellidos || '-'}</td>
-                        <td className="py-3 text-slate-500">{p.created_at?.substring(0, 10) || '-'}</td>
-                        <td className="py-3 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => { setPersForm({ id: p.id, dni: p.dni || '', nombres: p.nombres || '', apellidos: p.apellidos || '' }); setShowPersModal(true); }}
-                              className="p-1.5 bg-slate-100 hover:bg-blue-600 hover:text-white rounded-lg text-slate-600 transition-colors"
-                              title="Editar"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={async () => {
-                                if (confirm(`¿Eliminar del registro al personal ${p.nombres} ${p.apellidos}?`)) {
-                                  const res = await fetch(`/api/personnel/${p.id}?username=${currentUser.username}`, { method: 'DELETE' });
-                                  if (res.ok) {
-                                    showToast('Personal eliminado del registro');
-                                    loadData();
-                                  } else {
-                                    showToast('Error al eliminar', 'error');
-                                  }
-                                }
-                              }}
-                              className="p-1.5 bg-red-50 hover:bg-red-600 hover:text-white text-red-600 rounded-lg transition-colors"
-                              title="Eliminar"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              {(() => {
+                const filteredPers = personnel.filter((p: any) => {
+                  const sTerm = (searchTerm || '').toLowerCase();
+                  const pDni = String(p?.dni || '');
+                  const pNom = String(p?.nombres || '').toLowerCase();
+                  const pApe = String(p?.apellidos || '').toLowerCase();
+                  return pDni.includes(sTerm) || pNom.includes(sTerm) || pApe.includes(sTerm);
+                });
+
+                const paginatedPers = filteredPers.slice((persPage - 1) * persPageSize, persPage * persPageSize);
+
+                return (
+                  <>
+                    <div className="overflow-x-auto rounded-xl border border-slate-200">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="bg-slate-100 border-b border-slate-200 text-slate-600 uppercase font-bold tracking-wider">
+                            <th className="py-3.5 px-4">DNI</th>
+                            <th className="py-3.5 px-4">Nombres</th>
+                            <th className="py-3.5 px-4">Apellidos</th>
+                            <th className="py-3.5 px-4">Fecha de Registro</th>
+                            <th className="py-3.5 px-4 text-right">Acciones</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {paginatedPers.length === 0 ? (
+                            <tr>
+                              <td colSpan={5} className="py-8 text-center text-slate-500 italic">
+                                No se encontró ningún personal con el filtro "{searchTerm}"
+                              </td>
+                            </tr>
+                          ) : (
+                            paginatedPers.map((p: any, idx: number) => (
+                              <tr key={p.id} className={idx % 2 === 0 ? 'bg-white hover:bg-slate-50' : 'bg-slate-50/50 hover:bg-slate-100/80'}>
+                                <td className="py-3 px-4 font-mono font-bold text-blue-600">{p.dni}</td>
+                                <td className="py-3 px-4 font-bold text-slate-900">{p.nombres || '-'}</td>
+                                <td className="py-3 px-4 font-bold text-slate-900">{p.apellidos || '-'}</td>
+                                <td className="py-3 px-4 text-slate-500">{p.created_at?.substring(0, 10) || '-'}</td>
+                                <td className="py-3 px-4 text-right">
+                                  <div className="flex items-center justify-end gap-2">
+                                    <button
+                                      onClick={() => { setPersForm({ id: p.id, dni: p.dni || '', nombres: p.nombres || '', apellidos: p.apellidos || '' }); setShowPersModal(true); }}
+                                      className="p-1.5 bg-slate-100 hover:bg-blue-600 hover:text-white rounded-lg text-slate-600 transition-colors"
+                                      title="Editar"
+                                    >
+                                      <Edit2 className="w-4 h-4" />
+                                    </button>
+                                    <button
+                                      onClick={async () => {
+                                        if (confirm(`¿Eliminar del registro al personal ${p.nombres} ${p.apellidos}?`)) {
+                                          const res = await fetch(`/api/personnel/${p.id}?username=${currentUser.username}`, { method: 'DELETE' });
+                                          if (res.ok) {
+                                            showToast('Personal eliminado del registro');
+                                            loadData();
+                                          } else {
+                                            showToast('Error al eliminar', 'error');
+                                          }
+                                        }
+                                      }}
+                                      className="p-1.5 bg-red-50 hover:bg-red-600 hover:text-white text-red-600 rounded-lg transition-colors"
+                                      title="Eliminar"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <PaginationControls
+                      currentPage={persPage}
+                      totalItems={filteredPers.length}
+                      pageSize={persPageSize}
+                      onPageChange={setPersPage}
+                      onPageSizeChange={setPersPageSize}
+                    />
+                  </>
+                );
+              })()}
             </div>
           </div>
         )}
@@ -2756,11 +2950,11 @@ export default function App() {
               </div>
 
               {/* Tabla de Resultados */}
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <div className="flex justify-between items-center mb-4">
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+                <div className="flex justify-between items-center">
                   <h3 className="text-sm font-bold text-slate-900">Listado de Comprobantes Filtrados</h3>
                   <span className="text-xs font-mono font-semibold text-slate-500">
-                    Mostrando {filteredDeliveries.length} registro(s)
+                    Total {filteredDeliveries.length} registro(s)
                   </span>
                 </div>
 
@@ -2784,67 +2978,82 @@ export default function App() {
                     </button>
                   </div>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs">
-                      <thead>
-                        <tr className="border-b border-slate-200 text-slate-500 uppercase">
-                          <th className="pb-3">Comprobante</th>
-                          <th className="pb-3">Fecha</th>
-                          <th className="pb-3">Establecimiento Destino</th>
-                          <th className="pb-3">Receptor (DNI y Nombre)</th>
-                          <th className="pb-3">Responsable Almacén</th>
-                          <th className="pb-3 text-right">Acciones PDF</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {filteredDeliveries.map((d: any) => (
-                          <tr key={d.id} className="hover:bg-slate-50">
-                            <td className="py-3 font-mono font-bold text-blue-600">
-                              {d.numero_comprobante}
-                              {d.status === 'anulado' && (
-                                <span className="ml-2 px-1.5 py-0.5 bg-red-100 text-red-700 text-[10px] font-bold rounded">
-                                  ANULADO
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-3 text-slate-600 font-medium">{d.fecha_entrega}</td>
-                            <td className="py-3 font-semibold text-slate-900">{d.establishment_nombre}</td>
-                            <td className="py-3 text-slate-700 font-medium">{d.receptor_nombre} ({d.receptor_dni})</td>
-                            <td className="py-3 text-slate-500">{d.username || 'Sistema'}</td>
-                            <td className="py-3 text-right">
-                              <div className="flex items-center justify-end gap-2">
-                                <button
-                                  onClick={() => generatePDF(d)}
-                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow"
-                                >
-                                  <Printer className="w-3.5 h-3.5" /> Descargar PDF
-                                </button>
-                                {d.status !== 'anulado' && (
-                                  <button
-                                    onClick={async () => {
-                                      if (confirm(`¿Anular la entrega comprobante ${d.numero_comprobante}?`)) {
-                                        const res = await fetch(`/api/deliveries/${d.id}?username=${currentUser.username}`, { method: 'DELETE' });
-                                        if (res.ok) {
-                                          showToast('Comprobante anulado');
-                                          loadData();
-                                        } else {
-                                          showToast('Error al anular', 'error');
-                                        }
-                                      }
-                                    }}
-                                    className="px-2.5 py-1.5 bg-red-50 hover:bg-red-600 hover:text-white text-red-600 font-semibold rounded-lg transition-colors flex items-center gap-1"
-                                    title="Anular comprobante"
-                                  >
-                                    <X className="w-3.5 h-3.5" /> Anular
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <>
+                    {(() => {
+                      const paginatedDeliveries = filteredDeliveries.slice((reportPage - 1) * reportPageSize, reportPage * reportPageSize);
+                      return (
+                        <div className="overflow-x-auto rounded-xl border border-slate-200">
+                          <table className="w-full text-left text-xs">
+                            <thead>
+                              <tr className="bg-slate-100 border-b border-slate-200 text-slate-600 uppercase font-bold tracking-wider">
+                                <th className="py-3.5 px-4">Comprobante</th>
+                                <th className="py-3.5 px-4">Fecha</th>
+                                <th className="py-3.5 px-4">Establecimiento Destino</th>
+                                <th className="py-3.5 px-4">Receptor (DNI y Nombre)</th>
+                                <th className="py-3.5 px-4">Responsable Almacén</th>
+                                <th className="py-3.5 px-4 text-right">Acciones PDF</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {paginatedDeliveries.map((d: any, idx: number) => (
+                                <tr key={d.id} className={idx % 2 === 0 ? 'bg-white hover:bg-slate-50' : 'bg-slate-50/50 hover:bg-slate-100/80'}>
+                                  <td className="py-3 px-4 font-mono font-bold text-blue-600">
+                                    {d.numero_comprobante}
+                                    {d.status === 'anulado' && (
+                                      <span className="ml-2 px-1.5 py-0.5 bg-red-100 text-red-700 text-[10px] font-bold rounded">
+                                        ANULADO
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-3 px-4 text-slate-600 font-medium">{d.fecha_entrega}</td>
+                                  <td className="py-3 px-4 font-bold text-slate-900">{d.establishment_nombre}</td>
+                                  <td className="py-3 px-4 text-slate-700 font-medium">{d.receptor_nombre} ({d.receptor_dni})</td>
+                                  <td className="py-3 px-4 text-slate-500 font-medium">{d.username || 'Sistema'}</td>
+                                  <td className="py-3 px-4 text-right">
+                                    <div className="flex items-center justify-end gap-2">
+                                      <button
+                                        onClick={() => generatePDF(d)}
+                                        className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow"
+                                      >
+                                        <Printer className="w-3.5 h-3.5" /> Descargar PDF
+                                      </button>
+                                      {d.status !== 'anulado' && (
+                                        <button
+                                          onClick={async () => {
+                                            if (confirm(`¿Anular la entrega comprobante ${d.numero_comprobante}?`)) {
+                                              const res = await fetch(`/api/deliveries/${d.id}?username=${currentUser.username}`, { method: 'DELETE' });
+                                              if (res.ok) {
+                                                showToast('Comprobante anulado');
+                                                loadData();
+                                              } else {
+                                                showToast('Error al anular', 'error');
+                                              }
+                                            }
+                                          }}
+                                          className="px-2.5 py-1.5 bg-red-50 hover:bg-red-600 hover:text-white text-red-600 font-semibold rounded-lg transition-colors flex items-center gap-1"
+                                          title="Anular comprobante"
+                                        >
+                                          <X className="w-3.5 h-3.5" /> Anular
+                                        </button>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })()}
+
+                    <PaginationControls
+                      currentPage={reportPage}
+                      totalItems={filteredDeliveries.length}
+                      pageSize={reportPageSize}
+                      onPageChange={setReportPage}
+                      onPageSizeChange={setReportPageSize}
+                    />
+                  </>
                 )}
               </div>
             </div>
