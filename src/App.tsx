@@ -1152,50 +1152,50 @@ export default function App() {
     doc.setFontSize(8.5);
     doc.setTextColor(51, 65, 85);
 
-    // Columna 1
+    // Columna 1 (Izquierda)
     doc.setFont('helvetica', 'bold');
-    doc.text('Fecha / Hora de Emisión:', 18, 58);
+    doc.text('Fecha Emisión:', 18, 58);
     doc.setFont('helvetica', 'normal');
-    doc.text(`${delivery.fecha_entrega || new Date().toISOString().substring(0, 10)}`, 62, 58);
+    doc.text(`${delivery.fecha_entrega || new Date().toISOString().substring(0, 10)}`, 48, 58);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('Establecimiento (IPRESS):', 18, 64);
+    doc.text('Establecimiento:', 18, 64);
     doc.setFont('helvetica', 'normal');
     const estNombre = delivery.establishment_nombre || 'N/A';
-    doc.text(estNombre.length > 42 ? estNombre.substring(0, 39) + '...' : estNombre, 62, 64);
+    doc.text(estNombre.length > 38 ? estNombre.substring(0, 35) + '...' : estNombre, 48, 64);
 
     doc.setFont('helvetica', 'bold');
     doc.text('Código RENAES:', 18, 70);
     doc.setFont('helvetica', 'normal');
-    doc.text(`${delivery.renaes || 'N/A'}`, 62, 70);
+    doc.text(`${delivery.renaes || 'N/A'}`, 48, 70);
 
-    // Columna 2
     doc.setFont('helvetica', 'bold');
-    doc.text('Personal Receptor:', 115, 58);
+    doc.text('Origen:', 18, 76);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Almacén Central DSLLCC', 48, 76);
+
+    // Columna 2 (Derecha)
+    doc.setFont('helvetica', 'bold');
+    doc.text('Receptor:', 125, 58);
     doc.setFont('helvetica', 'normal');
     const recNombre = delivery.receptor_nombre || 'N/A';
-    doc.text(recNombre.length > 32 ? recNombre.substring(0, 29) + '...' : recNombre, 142, 58);
+    doc.text(recNombre.length > 28 ? recNombre.substring(0, 25) + '...' : recNombre, 150, 58);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('DNI Receptor:', 115, 64);
+    doc.text('DNI Receptor:', 125, 64);
     doc.setFont('helvetica', 'normal');
-    doc.text(`${delivery.receptor_dni || 'N/A'}`, 142, 64);
+    doc.text(`${delivery.receptor_dni || 'N/A'}`, 150, 64);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('Emisor / Resp. Almacén:', 115, 70);
+    doc.text('Resp. Almacén:', 125, 70);
     doc.setFont('helvetica', 'normal');
     const emisorNombre = delivery.username || 'Sistema';
-    doc.text(emisorNombre.length > 32 ? emisorNombre.substring(0, 29) + '...' : emisorNombre, 142, 70);
+    doc.text(emisorNombre.length > 28 ? emisorNombre.substring(0, 25) + '...' : emisorNombre, 150, 70);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('Origen / Sub Región:', 18, 76);
+    doc.text('Estado:', 125, 76);
     doc.setFont('helvetica', 'normal');
-    doc.text('Almacén Central DSLLCC - Sullana', 62, 76);
-
-    doc.setFont('helvetica', 'bold');
-    doc.text('Estado Comprobante:', 115, 76);
-    doc.setFont('helvetica', 'normal');
-    doc.text('ENTREGADO / PENDIENTE', 142, 76);
+    doc.text('ENTREGADO', 150, 76);
 
     // --- 4. TABLA DE FORMATOS Y PRODUCTOS ENTREGADOS ---
     const tableData = (delivery.items || []).map((item: any, index: number) => {
