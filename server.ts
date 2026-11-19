@@ -758,9 +758,20 @@ app.post('/api/programming/bulk', (req, res) => {
     const transaction = db.transaction(() => {
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
-        const rawEst = String(item.establishment || item.renaes || item.establishment_id || '').trim().toLowerCase();
-        const rawBatch = String(item.lote || item.batch_codigo || item.batch_id || '').trim().toLowerCase();
-        const qty = parseInt(item.cantidad) || 0;
+        const rawEst = String(
+          item.establishment || item.renaes || item.RENAES || 
+          item.establecimiento || item.Establecimiento || 
+          item.establishment_id || ''
+        ).trim().toLowerCase();
+
+        const rawBatch = String(
+          item.lote || item.Lote || item.batch_codigo || 
+          item.batch_id || ''
+        ).trim().toLowerCase();
+
+        const qty = parseInt(
+          item.cantidad || item.Cantidad || item.qty || 0
+        ) || 0;
 
         if (!rawEst || !rawBatch || qty <= 0) {
           errors.push(`Fila ${i + 1}: Datos incompletos o cantidad inválida (${qty})`);
