@@ -1953,7 +1953,7 @@ app.get('/api/dashboard/stats', (req, res) => {
     const totalEst = (db.prepare('SELECT COUNT(*) as count FROM establishments WHERE activo = 1').get() as any).count;
     const totalProg = (db.prepare('SELECT COALESCE(SUM(cantidad), 0) as total FROM programming').get() as any).total;
     const totalRec = (db.prepare('SELECT COALESCE(SUM(cantidad_recibida), 0) as total FROM receptions').get() as any).total;
-    const totalDeliv = (db.prepare('SELECT COALESCE(SUM(cantidad), 0) as total FROM delivery_items di JOIN deliveries d ON di.delivery_id = d.id WHERE d.status = "completado"').get() as any).total;
+    const totalDeliv = (db.prepare("SELECT COALESCE(SUM(cantidad), 0) as total FROM delivery_items di JOIN deliveries d ON di.delivery_id = d.id WHERE d.status = 'completado'").get() as any).total;
     const pendingRec = totalProg - totalRec;
 
     res.json({
