@@ -1156,43 +1156,46 @@ export default function App() {
     doc.setFont('helvetica', 'bold');
     doc.text('Fecha / Hora de Emisión:', 18, 58);
     doc.setFont('helvetica', 'normal');
-    doc.text(`${delivery.fecha_entrega || new Date().toISOString().substring(0, 10)}`, 55, 58);
+    doc.text(`${delivery.fecha_entrega || new Date().toISOString().substring(0, 10)}`, 62, 58);
 
     doc.setFont('helvetica', 'bold');
     doc.text('Establecimiento (IPRESS):', 18, 64);
     doc.setFont('helvetica', 'normal');
-    doc.text(`${delivery.establishment_nombre || 'N/A'}`, 55, 64);
+    const estNombre = delivery.establishment_nombre || 'N/A';
+    doc.text(estNombre.length > 42 ? estNombre.substring(0, 39) + '...' : estNombre, 62, 64);
 
     doc.setFont('helvetica', 'bold');
     doc.text('Código RENAES:', 18, 70);
     doc.setFont('helvetica', 'normal');
-    doc.text(`${delivery.renaes || 'N/A'}`, 55, 70);
+    doc.text(`${delivery.renaes || 'N/A'}`, 62, 70);
 
     // Columna 2
     doc.setFont('helvetica', 'bold');
-    doc.text('Personal Receptor:', 110, 58);
+    doc.text('Personal Receptor:', 115, 58);
     doc.setFont('helvetica', 'normal');
-    doc.text(`${delivery.receptor_nombre || 'N/A'}`, 142, 58);
+    const recNombre = delivery.receptor_nombre || 'N/A';
+    doc.text(recNombre.length > 32 ? recNombre.substring(0, 29) + '...' : recNombre, 142, 58);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('DNI Receptor:', 110, 64);
+    doc.text('DNI Receptor:', 115, 64);
     doc.setFont('helvetica', 'normal');
     doc.text(`${delivery.receptor_dni || 'N/A'}`, 142, 64);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('Emisor / Resp. Almacén:', 110, 70);
+    doc.text('Emisor / Resp. Almacén:', 115, 70);
     doc.setFont('helvetica', 'normal');
-    doc.text(`${delivery.username || 'Sistema'}`, 142, 70);
+    const emisorNombre = delivery.username || 'Sistema';
+    doc.text(emisorNombre.length > 32 ? emisorNombre.substring(0, 29) + '...' : emisorNombre, 142, 70);
 
     doc.setFont('helvetica', 'bold');
     doc.text('Origen / Sub Región:', 18, 76);
     doc.setFont('helvetica', 'normal');
-    doc.text('Almacén Central DSLLCC - Sullana', 55, 76);
+    doc.text('Almacén Central DSLLCC - Sullana', 62, 76);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('Estado Comprobante:', 110, 76);
+    doc.text('Estado Comprobante:', 115, 76);
     doc.setFont('helvetica', 'normal');
-    doc.text('ENTREGADO / CONFORMIDAD PENDIENTE DE FIRMA', 142, 76);
+    doc.text('ENTREGADO / PENDIENTE', 142, 76);
 
     // --- 4. TABLA DE FORMATOS Y PRODUCTOS ENTREGADOS ---
     const tableData = (delivery.items || []).map((item: any, index: number) => {
