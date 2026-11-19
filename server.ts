@@ -1894,7 +1894,7 @@ app.post('/api/warehouse/packages/:id/movement', (req, res) => {
 
         // Deduct inventory stock
         if (pkg.establishment_id && pkg.product_id) {
-          const st = db.prepare('SELECT id, stock_actual FROM inventory_stock WHERE establishment_id = ? AND product_id = ? AND estado = "disponible" ORDER BY id DESC LIMIT 1').get(pkg.establishment_id, pkg.product_id) as any;
+          const st = db.prepare("SELECT id, stock_actual FROM inventory_stock WHERE establishment_id = ? AND product_id = ? AND estado = 'disponible' ORDER BY id DESC LIMIT 1").get(pkg.establishment_id, pkg.product_id) as any;
           if (st) {
             const nextStock = Math.max(0, st.stock_actual - qty);
             db.prepare('UPDATE inventory_stock SET stock_actual = ?, estado = ? WHERE id = ?').run(
